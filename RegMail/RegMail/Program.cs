@@ -11,6 +11,9 @@ using System.Threading.Tasks;
 using System.Text.RegularExpressions;
 using ClosedXML.Excel;
 using System.IO;
+using System.Linq;
+using SeleniumExtras.WaitHelpers;
+
 public class OtpResponse
 {
     public string message { get; set; }
@@ -71,7 +74,7 @@ class Program
             FillMonthNew(driver);
             FillGenderNew(driver);
             ClickNextButton(driver);
-     
+
             string email = FillUsername(driver, firstName, lastName);
             string password = FillPassword(driver);
             ClickNextButton(driver);
@@ -116,7 +119,6 @@ class Program
         while (!success && x < 100)
         {
             username = firstName.ToLower() + "90" + lastName.ToLower() + x;
-       
             IWebElement usernameField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
                 .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Username']")));
             usernameField.Clear();
@@ -175,11 +177,30 @@ class Program
                 .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//span[contains(text(), 'Next')]")));
 
             IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            // Scroll button vào view nếu cần
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButton);
+            Thread.Sleep(200);
             js.ExecuteScript("arguments[0].click();", nextButton);
-
             Thread.Sleep(1000);
         }
-        catch (Exception) { }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Lỗi click Next: {ex.Message}");
+            // Thử lại một lần nữa nếu gặp lỗi
+            try
+            {
+                IWebElement nextButton = driver.FindElement(By.XPath("//span[contains(text(), 'Next')]"));
+                IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+                js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButton);
+                Thread.Sleep(200);
+                js.ExecuteScript("arguments[0].click();", nextButton);
+                Thread.Sleep(1000);
+            }
+            catch (Exception retryEx)
+            {
+                Console.WriteLine($"❌ Vẫn không click được Next: {retryEx.Message}");
+            }
+        }
     }
 
     static void FillDayAndYearNew(IWebDriver driver)
@@ -204,50 +225,103 @@ class Program
         }
     }
 
+
     static void FillMonthNew(IWebDriver driver)
+{
+    try
     {
-        try
+        // Click vào dropdown tháng
+        IWebElement monthDropdown = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+            .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//span[contains(text(), 'Month')]")));
+
+        IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+        js.ExecuteScript("arguments[0].click();", monthDropdown);
+
+        Thread.Sleep(1000);
+
+        string[] months = {
+                "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        };
+        Random random = new Random();
+        string month = months[random.Next(months.Length)];
+
+        // Tìm element tháng
+        var selectedMonth = driver.FindElements(By.XPath("//li[@role='option']"))
+            .FirstOrDefault(opt => opt.Text.Trim() == month);
+
+        if (selectedMonth != null)
         {
-            Random random = new Random();
-            string[] months = { "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December" };
-            string month = months[random.Next(months.Length)];
-
-            IWebElement monthDropdown = driver.FindElement(By.Id("month"));
-            SelectElement selectMonth = new SelectElement(monthDropdown);
-            selectMonth.SelectByText(month);
-
-            Console.WriteLine("Đã chọn tháng: " + month);
+            // Force scroll element into view trong dropdown container
+            js.ExecuteScript(@"
+                var element = arguments[0];
+                var container = element.closest('.dropdown-menu, .select-dropdown, [role=""listbox""]');
+                if (container) {
+                    element.scrollIntoView({block: 'center', inline: 'nearest'});
+                }
+            ", selectedMonth);
+            
+            Thread.Sleep(200);
+            
+            // Click element
+            js.ExecuteScript("arguments[0].click();", selectedMonth);
+            Console.WriteLine("✅ Đã chọn tháng: " + month);
         }
-        catch (Exception ex)
+        else
         {
-            Console.WriteLine("Lỗi chọn tháng: " + ex.Message);
+            Console.WriteLine("❌ Không tìm thấy tháng: " + month);
         }
     }
+    catch (Exception ex)
+    {
+        Console.WriteLine("❌ Lỗi thao tác dropdown tháng: " + ex.Message);
+    }
+}
+
+
+
 
     static void FillGenderNew(IWebDriver driver)
     {
         try
         {
-            string[] genders = { "Male", "Female" };
+            // Click vào dropdown giới tính (span)
+            IWebElement genderDropdown = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//span[contains(text(), 'Gender')]")));
+
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].click();", genderDropdown);
+
+            Thread.Sleep(1000); // Đợi dropdown hiện ra
+
+            string[] genders = { "Male", "Female"};
             Random random = new Random();
             string gender = genders[random.Next(genders.Length)];
 
-            IWebElement genderDropdown = driver.FindElement(By.Id("gender"));
-            SelectElement selectGender = new SelectElement(genderDropdown);
-            selectGender.SelectByText(gender);
+            // Tìm element option giới tính đúng với text random
+            var selectedGender = driver.FindElements(By.XPath("//li[@role='option']"))
+                .FirstOrDefault(opt => opt.Text.Trim() == gender);
 
-            Console.WriteLine("Đã chọn giới tính: " + gender);
+            if (selectedGender != null)
+            {
+                js.ExecuteScript("arguments[0].click();", selectedGender);
+                Console.WriteLine("✅ Đã chọn giới tính: " + gender);
+            }
+            else
+            {
+                Console.WriteLine("❌ Không tìm thấy giới tính: " + gender);
+            }
         }
         catch (Exception ex)
         {
-            Console.WriteLine("Lỗi chọn giới tính: " + ex.Message);
+            Console.WriteLine("❌ Lỗi thao tác dropdown giới tính: " + ex.Message);
         }
     }
 
     static async Task HandleRequestSever(IWebDriver driver, string userNameParam, string passwordParam)
     {
         var client = new HttpClient();
-        string url = "https://dailyotp.com/api/rent-number?appBrand=Google / Gmail / Youtube&countryCode=US&serverName=Server 1&api_key=74f6b03afb90f76b7355081687d70faf5mUcE7lFK4xIZKCBOVS3";
+        string url = "https://dailyotp.com/api/rent-number?appBrand=Google / Gmail / Youtube&countryCode=US&serverName=Server 1&api_key=4cdba4a83cb5e06bf4f81bb491f7a434vUo9b9CciGZ1VPPjbDcj";
 
         HttpResponseMessage response = await client.GetAsync(url);
         if (response.IsSuccessStatusCode)
@@ -284,7 +358,7 @@ class Program
 
     static async Task HandleGetCode(IWebDriver driver, string transId, string userNameParam, string passwordParam)
     {
-        string url = $"https://dailyotp.com/api/get-messages?transId={transId}&api_key=74f6b03afb90f76b7355081687d70faf5mUcE7lFK4xIZKCBOVS3";
+        string url = $"https://dailyotp.com/api/get-messages?transId={transId}&api_key=4cdba4a83cb5e06bf4f81bb491f7a434vUo9b9CciGZ1VPPjbDcj";
         var client = new HttpClient();
 
         int retry = 0;
@@ -348,7 +422,7 @@ class Program
     static void HandleWriteExcel(string userNameParam, string passwordParam)
     {
         // Đường dẫn tới file Excel có sẵn
-        string filePath = @"D:\RegMail\TestWriteInExel\ExcelDataGmailData.xlsx";
+        string filePath = @"C:\Users\lqanh\OneDrive\ドキュメント\Reg\TestWriteInExel\ExcelDataGmailData.xlsx";
 
         // Kiểm tra file có tồn tại không
         if (!File.Exists(filePath))

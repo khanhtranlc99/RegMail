@@ -1,9 +1,9 @@
 {
   "Version": 1,
-  "WorkspaceRootPath": "D:\\RegMail\\RegMail\\",
+  "WorkspaceRootPath": "C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|d:\\regmail\\regmail\\regmail\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "AbsoluteMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|c:\\users\\lqanh\\onedrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\reg\\regmail\\regmail\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|solutionrelative:regmail\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
@@ -14,17 +14,21 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 0,
+          "SelectedChildIndex": 1,
           "Children": [
+            {
+              "$type": "Bookmark",
+              "Name": "ST:128:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
             {
               "$type": "Document",
               "DocumentIndex": 0,
               "Title": "Program.cs",
-              "DocumentMoniker": "D:\\RegMail\\RegMail\\RegMail\\Program.cs",
+              "DocumentMoniker": "C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\RegMail\\Program.cs",
               "RelativeDocumentMoniker": "RegMail\\Program.cs",
-              "ToolTip": "D:\\RegMail\\RegMail\\RegMail\\Program.cs",
+              "ToolTip": "C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\RegMail\\Program.cs",
               "RelativeToolTip": "RegMail\\Program.cs",
-              "ViewState": "AgIAAFQBAAAAAAAAAAAswIABAABsAAAAAAAAAA==",
+              "ViewState": "AgIAAOoAAAAAAAAAAIAwwPAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2025-02-26T14:02:38.429Z",
               "EditorCaption": ""
