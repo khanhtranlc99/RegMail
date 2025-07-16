@@ -66,7 +66,6 @@ class Program
 
             Thread.Sleep(5000);
 
-            ClickNextButton(driver);
             string firstName = FillFirstName(driver);
             string lastName = FillLastName(driver);
             ClickNextButton(driver);
@@ -74,6 +73,8 @@ class Program
             FillMonthNew(driver);
             FillGenderNew(driver);
             ClickNextButton(driver);
+            ClickNextButton(driver);
+            ClickCreateOwnGmail(driver);
 
             string email = FillUsername(driver, firstName, lastName);
             string password = FillPassword(driver);
@@ -85,6 +86,17 @@ class Program
         }
     }
 
+    // Hàm nhập từng ký tự một với delay ngẫu nhiên
+    static void HumanType(IWebElement element, string text)
+    {
+        Random randomDelay = new Random();
+        foreach (char c in text)
+        {
+            element.SendKeys(c.ToString());
+            Thread.Sleep(randomDelay.Next(80, 180));
+        }
+    }
+
     static string FillFirstName(IWebDriver driver)
     {
         string[] firstNames = { "Acacia", "Adela", "Blanche", "Bridget", "Donna" };
@@ -93,7 +105,9 @@ class Program
 
         IWebElement firstNameField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
             .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='First name']")));
-        firstNameField.SendKeys(randomFirstName);
+        // Nhập từng ký tự một
+        firstNameField.Clear();
+        HumanType(firstNameField, randomFirstName);
 
         return randomFirstName;
     }
@@ -106,7 +120,9 @@ class Program
 
         IWebElement lastNameField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
             .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Last name (optional)']")));
-        lastNameField.SendKeys(randomLastName);
+        // Nhập từng ký tự một
+        lastNameField.Clear();
+        HumanType(lastNameField, randomLastName);
 
         return randomLastName;
     }
@@ -119,10 +135,12 @@ class Program
         while (!success && x < 100)
         {
             username = firstName.ToLower() + "90" + lastName.ToLower() + x;
+            // Tìm ô nhập cho 'Create a Gmail address'
             IWebElement usernameField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
-                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Username']")));
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Create a Gmail address']")));
             usernameField.Clear();
-            usernameField.SendKeys(username);
+            // Nhập từng ký tự một
+            HumanType(usernameField, username);
 
             ClickNextButton(driver);
             Thread.Sleep(2000);
@@ -146,11 +164,13 @@ class Program
 
         IWebElement passwordField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
             .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Password']")));
-        passwordField.SendKeys(password);
+        passwordField.Clear();
+        HumanType(passwordField, password);
 
         IWebElement confirmPasswordField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
             .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Confirm']")));
-        confirmPasswordField.SendKeys(password);
+        confirmPasswordField.Clear();
+        HumanType(confirmPasswordField, password);
 
         return password;
     }
@@ -212,10 +232,12 @@ class Program
             int year = random.Next(1985, 2010);
 
             IWebElement dayField = driver.FindElement(By.XPath("//input[@aria-label='Day']"));
-            dayField.SendKeys(day.ToString());
+            dayField.Clear();
+            HumanType(dayField, day.ToString());
 
             IWebElement yearField = driver.FindElement(By.XPath("//input[@aria-label='Year']"));
-            yearField.SendKeys(year.ToString());
+            yearField.Clear();
+            HumanType(yearField, year.ToString());
 
             Console.WriteLine("Đã nhập ngày: " + day + " - năm: " + year);
         }
@@ -457,6 +479,26 @@ class Program
         catch (IOException ex)
         {
             Console.WriteLine("❌ Không thể ghi vào file Excel. Có thể đang mở file. Chi tiết: " + ex.Message);
+        }
+    }
+
+    static void ClickCreateOwnGmail(IWebDriver driver)
+    {
+        try
+        {
+            // Tìm element chứa text "Create your own Gmail address"
+            var createOwnOption = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(d => d.FindElement(By.XPath("//*[contains(text(), 'Create your own Gmail address')]")));
+
+            // Click vào option này (thường là label hoặc span)
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].click();", createOwnOption);
+
+            Console.WriteLine("✅ Đã chọn 'Create your own Gmail address'");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine("❌ Không click được 'Create your own Gmail address': " + ex.Message);
         }
     }
 }
