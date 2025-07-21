@@ -66,23 +66,39 @@ class Program
 
             Thread.Sleep(5000);
 
+            ((IJavaScriptExecutor)driver).ExecuteScript("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})");
+
+            // Thao tác người dùng thật trước khi điền form
+            HumanLikeActions(driver);
+
             string firstName = FillFirstName(driver);
             string lastName = FillLastName(driver);
             ClickNextButton(driver);
+            HumanLikeActions(driver);
             FillDayAndYearNew(driver);
             FillMonthNew(driver);
             FillGenderNew(driver);
             ClickNextButton(driver);
+            HumanLikeActions(driver);
             ClickNextButton(driver);
+            RandomDelay();
             ClickCreateOwnGmail(driver);
+            RandomDelay();
 
             string email = FillUsername(driver, firstName, lastName);
             string password = FillPassword(driver);
             ClickNextButton(driver);
 
             await HandleRequestSever(driver, email, password);
-
             Console.WriteLine($"✅ Tài khoản Gmail: {email}, Password: {password}");
+
+            // Ấn nút Next ở màn hình Review account info nếu xuất hiện
+            ClickReviewNextButton(driver);
+            // Ấn nút I agree ở màn hình Privacy and Terms nếu xuất hiện
+            ClickPrivacyAgreeButton(driver);
+            // Ấn nút Confirm nếu xuất hiện popup cá nhân hóa
+            ClickConfirmPersonalizationButton(driver);
+
         }
     }
 
@@ -105,8 +121,11 @@ class Program
 
         IWebElement firstNameField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
             .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='First name']")));
-        // Nhập từng ký tự một
-        firstNameField.Clear();
+        IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+        js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", firstNameField);
+        RandomDelay(200, 400);
+        firstNameField.Click();
+        RandomDelay(100, 200);
         HumanType(firstNameField, randomFirstName);
 
         return randomFirstName;
@@ -500,5 +519,122 @@ class Program
         {
             Console.WriteLine("❌ Không click được 'Create your own Gmail address': " + ex.Message);
         }
+    }
+
+    static void RandomDelay(int min = 300, int max = 900)
+    {
+        Random rnd = new Random();
+        Thread.Sleep(rnd.Next(min, max));
+    }
+
+    static void ClickReviewNextButton(IWebDriver driver)
+    {
+        try
+        {
+            // Tìm nút Next trên màn hình Review your account info
+            IWebElement nextButton = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Next']]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButton);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", nextButton);
+            Thread.Sleep(1000);
+            Console.WriteLine("✅ Đã ấn nút Next ở màn hình Review account info");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không ấn được nút Next ở màn hình Review account info: {ex.Message}");
+        }
+    }
+
+    static void ClickPrivacyAgreeButton(IWebDriver driver)
+    {
+        try
+        {
+            // Cuộn xuống cuối trang để nút I agree hiện ra
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("window.scrollTo(0, document.body.scrollHeight);");
+            Thread.Sleep(1000);
+            // Tìm nút I agree
+            IWebElement agreeButton = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='I agree']]")));
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", agreeButton);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", agreeButton);
+            Thread.Sleep(1000);
+            Console.WriteLine("✅ Đã ấn nút I agree ở màn hình Privacy and Terms");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không ấn được nút I agree: {ex.Message}");
+        }
+    }
+
+    static void ClickConfirmPersonalizationButton(IWebDriver driver)
+    {
+        try
+        {
+            // Tìm nút Confirm trên popup Confirm personalization
+            IWebElement confirmButton = new WebDriverWait(driver, TimeSpan.FromSeconds(5))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Confirm']]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", confirmButton);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", confirmButton);
+            Thread.Sleep(1000);
+            Console.WriteLine("✅ Đã ấn nút Confirm trên popup cá nhân hóa");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không ấn được nút Confirm trên popup cá nhân hóa: {ex.Message}");
+        }
+    }
+
+    // Hàm mô phỏng thao tác người dùng thật: di chuột, rê chuột, cuộn trang, click linh tinh, delay ngẫu nhiên
+    static void HumanLikeActions(IWebDriver driver)
+    {
+        Random rnd = new Random();
+        int actionCount = rnd.Next(2, 5); // Số lần thực hiện hành động linh tinh
+        int width = driver.Manage().Window.Size.Width;
+        int height = driver.Manage().Window.Size.Height;
+
+        for (int i = 0; i < actionCount; i++)
+        {
+            int actionType = rnd.Next(0, 4);
+            switch (actionType)
+            {
+                case 0: // Di chuột đến vị trí ngẫu nhiên
+                    int x = rnd.Next(0, width);
+                    int y = rnd.Next(0, height);
+                    try
+                    {
+                        var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                        actions.MoveByOffset(x, y).Perform();
+                    }
+                    catch { }
+                    break;
+                case 1: // Cuộn trang ngẫu nhiên
+                    int scrollY = rnd.Next(50, 400);
+                    ((IJavaScriptExecutor)driver).ExecuteScript($"window.scrollBy(0, {scrollY});");
+                    break;
+                case 2: // Click linh tinh vào vị trí ngẫu nhiên (tránh click vào các trường nhập liệu)
+                    var body = driver.FindElement(By.TagName("body"));
+                    try
+                    {
+                        var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                        actions.MoveToElement(body, rnd.Next(0, width), rnd.Next(0, height)).Click().Perform();
+                    }
+                    catch { }
+                    break;
+                case 3: // Dừng lại ngẫu nhiên (giả vờ đọc)
+                    int pause = rnd.Next(800, 2500);
+                    Thread.Sleep(pause);
+                    break;
+            }
+            // Delay ngẫu nhiên giữa các hành động
+            Thread.Sleep(rnd.Next(300, 1200));
+        }
+        // Dừng lại lâu hơn ở cuối
+        Thread.Sleep(rnd.Next(1000, 2500));
     }
 }
