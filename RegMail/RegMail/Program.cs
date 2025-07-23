@@ -13,6 +13,7 @@ using ClosedXML.Excel;
 using System.IO;
 using System.Linq;
 using SeleniumExtras.WaitHelpers;
+using OtpNet;
 
 public class OtpResponse
 {
@@ -89,15 +90,66 @@ class Program
             string password = FillPassword(driver);
             ClickNextButton(driver);
 
-            await HandleRequestSever(driver, email, password);
+            string phoneNumber2FA = null; // Khai báo ngoài class Program
+            await HandleRequestSever(driver, email, password, phoneNumber2FA);
             Console.WriteLine($"✅ Tài khoản Gmail: {email}, Password: {password}");
 
+            // Nếu có popup recovery email thì ấn Skip
+            ClickSkipRecoveryEmailButton(driver);
             // Ấn nút Next ở màn hình Review account info nếu xuất hiện
             ClickReviewNextButton(driver);
             // Ấn nút I agree ở màn hình Privacy and Terms nếu xuất hiện
             ClickPrivacyAgreeButton(driver);
             // Ấn nút Confirm nếu xuất hiện popup cá nhân hóa
             ClickConfirmPersonalizationButton(driver);
+            // Truy cập vào trang bảo mật 2FA
+            GoToGoogle2FA(driver);
+            // Ấn nút Add phone number nếu xuất hiện
+            ClickAddPhoneNumberButton(driver);
+            // Điền số điện thoại đã thuê vào popup 2FA và ấn Next
+            if (!string.IsNullOrEmpty(phoneNumber2FA))
+                Fill2FAPhoneAndNext(driver, phoneNumber2FA);
+            // Nếu có popup xác nhận số điện thoại thì ấn Save
+            ClickConfirmPhoneSaveButton(driver);
+            // Đợi và ấn nút Done nếu xuất hiện
+            ClickDoneButtonAfterPhoneVerify(driver);
+            // Truy cập vào Authenticator app và click setup
+            GoToAuthenticatorAppAndSetup(driver);
+            // Đợi popup QR và click Can't scan it
+            ClickCantScanItLink(driver);
+            // Lấy key, tạo mã OTP, lưu lại và ấn Next
+            string authKey = ExtractAuthenticatorKey(driver);
+            if (!string.IsNullOrEmpty(authKey))
+            {
+                string otpCode = GenerateOtpCode(authKey);
+                // Lưu key và mã OTP ra file hoặc log (tuỳ nhu cầu)
+                File.AppendAllText("authenticator_keys.txt", $"Key: {authKey} | OTP: {otpCode}\n");
+                Console.WriteLine($"Đã lưu key và mã OTP vào file authenticator_keys.txt");
+            }
+            // Ấn nút Next
+            try
+            {
+                IWebElement nextBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Next']]")));
+                IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+                js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextBtn);
+                Thread.Sleep(200);
+                js.ExecuteScript("arguments[0].click();", nextBtn);
+                Thread.Sleep(1000);
+                Console.WriteLine("✅ Đã ấn nút Next sau khi lấy key Authenticator");
+                // Sau khi ấn Next, điền mã OTP và ấn Verify
+                if (!string.IsNullOrEmpty(authKey))
+                {
+                    string otpCode = GenerateOtpCode(authKey);
+                    FillAuthenticatorCodeAndVerify(driver, otpCode);
+                    // Quay lại và xóa số điện thoại 2FA
+                    Remove2FAPhoneNumber(driver);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Không ấn được nút Next sau khi lấy key Authenticator: {ex.Message}");
+            }
 
         }
     }
@@ -359,8 +411,9 @@ class Program
         }
     }
 
-    static async Task HandleRequestSever(IWebDriver driver, string userNameParam, string passwordParam)
+    static async Task HandleRequestSever(IWebDriver driver, string userNameParam, string passwordParam, string phoneNumber2FA)
     {
+        phoneNumber2FA = null;
         var client = new HttpClient();
         string url = "https://dailyotp.com/api/rent-number?appBrand=Google / Gmail / Youtube&countryCode=US&serverName=Server 1&api_key=4cdba4a83cb5e06bf4f81bb491f7a434vUo9b9CciGZ1VPPjbDcj";
 
@@ -385,6 +438,7 @@ class Program
                 ClickNextButton(driver);
 
                 await HandleGetCode(driver, result.data.transId, userNameParam, passwordParam);
+                phoneNumber2FA = result.data.phoneNumber; // Gán giá trị cho biến toàn cục
             }
             catch (Exception ex)
             {
@@ -547,6 +601,26 @@ class Program
         }
     }
 
+    static void ClickSkipRecoveryEmailButton(IWebDriver driver)
+    {
+        try
+        {
+            // Tìm nút Skip trên popup recovery email (nếu có)
+            IWebElement skipButton = new WebDriverWait(driver, TimeSpan.FromSeconds(5))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Skip']]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", skipButton);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", skipButton);
+            Thread.Sleep(1000);
+            Console.WriteLine("✅ Đã ấn nút Skip ở popup recovery email");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không ấn được nút Skip ở popup recovery email (có thể không xuất hiện): {ex.Message}");
+        }
+    }
+
     static void ClickPrivacyAgreeButton(IWebDriver driver)
     {
         try
@@ -587,6 +661,247 @@ class Program
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Không ấn được nút Confirm trên popup cá nhân hóa: {ex.Message}");
+        }
+    }
+
+    static void GoToGoogle2FA(IWebDriver driver)
+    {
+        try
+        {
+            string url2FA = "https://myaccount.google.com/signinoptions/twosv";
+            driver.Navigate().GoToUrl(url2FA);
+            Thread.Sleep(3000);
+            Console.WriteLine("✅ Đã truy cập vào trang bảo mật 2FA của Google");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không truy cập được trang 2FA: {ex.Message}");
+        }
+    }
+
+    static void ClickAddPhoneNumberButton(IWebDriver driver)
+    {
+        try
+        {
+            // Tìm nút Add phone number trên trang 2FA
+            IWebElement addPhoneBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Add phone number']]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", addPhoneBtn);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", addPhoneBtn);
+            Thread.Sleep(1000);
+            Console.WriteLine("✅ Đã ấn nút Add phone number trên trang 2FA");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không ấn được nút Add phone number: {ex.Message}");
+        }
+    }
+
+    static void Fill2FAPhoneAndNext(IWebDriver driver, string phoneNumber)
+    {
+        try
+        {
+            // Tìm ô nhập số điện thoại
+            IWebElement phoneInput = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@type='tel' and @aria-label]")));
+            phoneInput.Clear();
+            phoneInput.SendKeys(phoneNumber);
+            Thread.Sleep(500);
+            // Tìm và click nút Next
+            IWebElement nextButton = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Next']]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButton);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", nextButton);
+            Thread.Sleep(1000);
+            Console.WriteLine($"✅ Đã điền số điện thoại 2FA và ấn Next: {phoneNumber}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không điền được số điện thoại 2FA hoặc không ấn được Next: {ex.Message}");
+        }
+    }
+
+    static void ClickConfirmPhoneSaveButton(IWebDriver driver)
+    {
+        try
+        {
+            // Tìm nút Save trên popup Confirm your phone number
+            IWebElement saveButton = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Save']]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", saveButton);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", saveButton);
+            Thread.Sleep(5000); // Đợi load xong
+            Console.WriteLine("✅ Đã ấn nút Save xác nhận số điện thoại 2FA");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không ấn được nút Save xác nhận số điện thoại 2FA: {ex.Message}");
+        }
+    }
+
+    static void ClickDoneButtonAfterPhoneVerify(IWebDriver driver)
+    {
+        try
+        {
+            // Đợi popup có nút Done xuất hiện và click
+            IWebElement doneButton = new WebDriverWait(driver, TimeSpan.FromSeconds(30))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Done']]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", doneButton);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", doneButton);
+            Thread.Sleep(1000);
+            Console.WriteLine("✅ Đã ấn nút Done sau khi xác nhận số điện thoại 2FA");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không ấn được nút Done sau xác nhận số điện thoại 2FA: {ex.Message}");
+        }
+    }
+
+    static void GoToAuthenticatorAppAndSetup(IWebDriver driver)
+    {
+        try
+        {
+            // Truy cập vào trang Authenticator app
+            string urlAuthApp = "https://myaccount.google.com/two-step-verification/authenticator";
+            driver.Navigate().GoToUrl(urlAuthApp);
+            Thread.Sleep(3000);
+            // Tìm và click nút Set up authenticator
+            IWebElement setupBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[contains(text(),'Set up authenticator')]]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", setupBtn);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", setupBtn);
+            Thread.Sleep(1000);
+            Console.WriteLine("✅ Đã truy cập và ấn nút Set up authenticator");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không truy cập hoặc không ấn được nút Set up authenticator: {ex.Message}");
+        }
+    }
+
+    static void ClickCantScanItLink(IWebDriver driver)
+    {
+        try
+        {
+            // Đợi popup QR xuất hiện và tìm link Can't scan it?
+            IWebElement cantScanLink = new WebDriverWait(driver, TimeSpan.FromSeconds(20))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//a[contains(text(), \"Can't scan it\")]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", cantScanLink);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", cantScanLink);
+            Thread.Sleep(1000);
+            Console.WriteLine("✅ Đã click vào link Can't scan it?");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không click được link Can't scan it?: {ex.Message}");
+        }
+    }
+
+    static string ExtractAuthenticatorKey(IWebDriver driver)
+    {
+        try
+        {
+            // Lấy text popup chứa key
+            IWebElement popup = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//div[contains(text(),'Enter your email address and this key')]")));
+            string popupText = popup.Text;
+            // Regex tìm key (dạng nhiều nhóm ký tự, có thể có khoảng trắng)
+            var match = System.Text.RegularExpressions.Regex.Match(popupText, @"([a-z0-9]{4,}\s+){3,}[a-z0-9]{4,}", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            if (match.Success)
+            {
+                string key = match.Value.Replace(" ", "").Trim();
+                Console.WriteLine($"✅ Đã lấy key Authenticator: {key}");
+                return key;
+            }
+            else
+            {
+                Console.WriteLine("❌ Không tìm thấy key Authenticator trong popup!");
+                return null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Lỗi khi lấy key Authenticator: {ex.Message}");
+            return null;
+        }
+    }
+
+    static string GenerateOtpCode(string key)
+    {
+        try
+        {
+            var bytes = OtpNet.Base32Encoding.ToBytes(key.ToUpper());
+            var totp = new OtpNet.Totp(bytes);
+            string otp = totp.ComputeTotp();
+            Console.WriteLine($"✅ Mã OTP từ key: {otp}");
+            return otp;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Lỗi tạo mã OTP từ key: {ex.Message}");
+            return null;
+        }
+    }
+
+    static void FillAuthenticatorCodeAndVerify(IWebDriver driver, string otpCode)
+    {
+        try
+        {
+            // Tìm ô nhập code
+            IWebElement codeInput = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@type='text' and @aria-label] | //input[@type='text' and @autocomplete] | //input[@type='text']")));
+            codeInput.Clear();
+            codeInput.SendKeys(otpCode);
+            Thread.Sleep(500);
+            // Tìm và click nút Verify
+            IWebElement verifyBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Verify']]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", verifyBtn);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", verifyBtn);
+            Thread.Sleep(1000);
+            Console.WriteLine($"✅ Đã điền mã OTP và ấn Verify: {otpCode}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không điền được mã OTP hoặc không ấn được Verify: {ex.Message}");
+        }
+    }
+
+    static void Remove2FAPhoneNumber(IWebDriver driver)
+    {
+        try
+        {
+            // Quay lại trang 2FA phone
+            string url2FA = "https://myaccount.google.com/two-step-verification/phone-numbers";
+            driver.Navigate().GoToUrl(url2FA);
+            Thread.Sleep(3000);
+            // Tìm và click vào biểu tượng thùng rác để xóa số điện thoại
+            IWebElement trashBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[@aria-label='Delete phone number' or @aria-label='Remove phone number' or .//span[@class='material-icons' and text()='delete']]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", trashBtn);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", trashBtn);
+            Thread.Sleep(1000);
+            Console.WriteLine("✅ Đã ấn vào biểu tượng thùng rác để xóa số điện thoại 2FA");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không xóa được số điện thoại 2FA: {ex.Message}");
         }
     }
 
