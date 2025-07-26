@@ -5,6 +5,18 @@
     {
       "AbsoluteMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|c:\\users\\lqanh\\onedrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\reg\\regmail\\regmail\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|solutionrelative:regmail\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\regmail\\proxymanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|solutionrelative:regmail\\proxymanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\regmail\\fingermanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|solutionrelative:regmail\\fingermanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\regmail\\proxyrotator.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{35F9C554-8C27-4B21-9EE4-08A29DB69111}|RegMail\\RegMail.csproj|solutionrelative:regmail\\proxyrotator.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     }
   ],
   "DocumentGroupContainers": [
@@ -14,11 +26,49 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 1,
+          "SelectedChildIndex": 4,
           "Children": [
             {
               "$type": "Bookmark",
               "Name": "ST:128:0:{116d2292-e37d-41cd-a077-ebacac4c8cc4}"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "ProxyRotator.cs",
+              "DocumentMoniker": "C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\RegMail\\ProxyRotator.cs",
+              "RelativeDocumentMoniker": "RegMail\\ProxyRotator.cs",
+              "ToolTip": "C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\RegMail\\ProxyRotator.cs",
+              "RelativeToolTip": "RegMail\\ProxyRotator.cs",
+              "ViewState": "AgIAAJEAAAAAAAAAAAAqwAQBAAABAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-07-26T11:30:38.199Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "ProxyManager.cs",
+              "DocumentMoniker": "C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\RegMail\\ProxyManager.cs",
+              "RelativeDocumentMoniker": "RegMail\\ProxyManager.cs",
+              "ToolTip": "C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\RegMail\\ProxyManager.cs",
+              "RelativeToolTip": "RegMail\\ProxyManager.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAB0BAAANAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-07-26T11:30:38.12Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "FingerManager.cs",
+              "DocumentMoniker": "C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\RegMail\\FingerManager.cs",
+              "RelativeDocumentMoniker": "RegMail\\FingerManager.cs",
+              "ToolTip": "C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\RegMail\\FingerManager.cs",
+              "RelativeToolTip": "RegMail\\FingerManager.cs",
+              "ViewState": "AgIAAD8BAAAAAAAAAAAkwFcAAAAdAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-07-26T11:28:34.168Z",
+              "EditorCaption": ""
             },
             {
               "$type": "Document",
@@ -28,7 +78,7 @@
               "RelativeDocumentMoniker": "RegMail\\Program.cs",
               "ToolTip": "C:\\Users\\lqanh\\OneDrive\\\u30C9\u30AD\u30E5\u30E1\u30F3\u30C8\\Reg\\RegMail\\RegMail\\Program.cs",
               "RelativeToolTip": "RegMail\\Program.cs",
-              "ViewState": "AgIAAI8BAAAAAAAAAAAkwJ8BAAAeAAAAAAAAAA==",
+              "ViewState": "AgIAAOIDAAAAAAAAAAAAAPsDAAA2AAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2025-02-26T14:02:38.429Z",
               "EditorCaption": ""

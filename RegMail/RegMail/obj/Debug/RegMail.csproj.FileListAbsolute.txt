@@ -101,3 +101,4 @@ C:\Users\lqanh\OneDrive\ドキュメント\Reg\RegMail\RegMail\obj\Debug\RegMail
 C:\Users\lqanh\OneDrive\ドキュメント\Reg\RegMail\RegMail\obj\Debug\RegMail.exe
 C:\Users\lqanh\OneDrive\ドキュメント\Reg\RegMail\RegMail\obj\Debug\RegMail.pdb
 C:\Users\lqanh\OneDrive\ドキュメント\Reg\RegMail\RegMail\bin\Debug\Otp.NET.dll
+C:\Users\lqanh\OneDrive\ドキュメント\Reg\RegMail\RegMail\obj\Debug\RegMail.exe.config

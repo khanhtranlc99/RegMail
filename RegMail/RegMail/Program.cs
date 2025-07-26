@@ -14,6 +14,7 @@ using System.IO;
 using System.Linq;
 using SeleniumExtras.WaitHelpers;
 using OtpNet;
+using RegMail;
 
 public class OtpResponse
 {
@@ -33,10 +34,18 @@ public class OtpData
 
 class Program
 {
+    private static ProxyManager _proxyManager;
+    private static string phoneNumber2FA;
     static async Task Main()
     {
         Console.OutputEncoding = Encoding.UTF8;
         Console.InputEncoding = Encoding.UTF8;
+
+        // Khởi tạo Proxy Manager
+        _proxyManager = new ProxyManager();
+        
+        // Hiển thị menu chọn chế độ proxy
+        await ShowProxyMenu();
 
         Console.Write("Nhập số lượng tab Chrome cần mở: ");
         if (!int.TryParse(Console.ReadLine(), out int tabCount) || tabCount <= 0)
@@ -60,14 +69,26 @@ class Program
             options.AddArgument("--new-window");
             options.AddArgument("--window-size=" + width + "," + height);
             options.AddArgument("--window-position=" + posX + "," + posY);
-            options.AddExcludedArgument("enable-automation");
-            options.AddArgument("--disable-blink-features=AutomationControlled");
+            // Tạo fingerprint từ danh sách profile có sẵn cho mỗi tab
+            var fingerprint = FingerprintManager.GetRandomProfile();
+            FingerprintManager.ConfigureChromeOptions(options, fingerprint);
+            
+            Console.WriteLine($"\n🔄 Tab {i + 1}: Sử dụng fingerprint '{fingerprint.ProfileName}'");
+            
+            // Cấu hình proxy cho Chrome
+            var proxy = _proxyManager.GetNextProxy();
+            if (proxy != null)
+            {
+               _proxyManager.ConfigureChromeOptions(options, proxy);
+            }
+            
             IWebDriver driver = new ChromeDriver(options);
             driver.Navigate().GoToUrl(signupUrl);
 
             Thread.Sleep(5000);
 
-            ((IJavaScriptExecutor)driver).ExecuteScript("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})");
+            // Inject JavaScript để thay đổi fingerprint và tránh phát hiện automation
+            InjectAntiDetectionScripts(driver);
 
             // Thao tác người dùng thật trước khi điền form
             HumanLikeActions(driver);
@@ -90,41 +111,34 @@ class Program
             string password = FillPassword(driver);
             ClickNextButton(driver);
 
-            string phoneNumber2FA = null; // Khai báo ngoài class Program
-            await HandleRequestSever(driver, email, password, phoneNumber2FA);
+            await HandleRequestSever(driver, email, password);
             Console.WriteLine($"✅ Tài khoản Gmail: {email}, Password: {password}");
 
-            // Nếu có popup recovery email thì ấn Skip
             ClickSkipRecoveryEmailButton(driver);
-            // Ấn nút Next ở màn hình Review account info nếu xuất hiện
             ClickReviewNextButton(driver);
-            // Ấn nút I agree ở màn hình Privacy and Terms nếu xuất hiện
             ClickPrivacyAgreeButton(driver);
-            // Ấn nút Confirm nếu xuất hiện popup cá nhân hóa
             ClickConfirmPersonalizationButton(driver);
-            // Truy cập vào trang bảo mật 2FA
             GoToGoogle2FA(driver);
-            // Ấn nút Add phone number nếu xuất hiện
-            ClickAddPhoneNumberButton(driver);
-            // Điền số điện thoại đã thuê vào popup 2FA và ấn Next
-            if (!string.IsNullOrEmpty(phoneNumber2FA))
-                Fill2FAPhoneAndNext(driver, phoneNumber2FA);
-            // Nếu có popup xác nhận số điện thoại thì ấn Save
+            ClickAddPhoneNumberButton(driver, phoneNumber2FA);
+            Fill2FAPhoneAndNext(driver, phoneNumber2FA);
             ClickConfirmPhoneSaveButton(driver);
-            // Đợi và ấn nút Done nếu xuất hiện
             ClickDoneButtonAfterPhoneVerify(driver);
             // Truy cập vào Authenticator app và click setup
             GoToAuthenticatorAppAndSetup(driver);
             // Đợi popup QR và click Can't scan it
             ClickCantScanItLink(driver);
             // Lấy key, tạo mã OTP, lưu lại và ấn Next
-            string authKey = ExtractAuthenticatorKey(driver);
-            if (!string.IsNullOrEmpty(authKey))
+            string authKeyWithSpaces = ExtractAuthenticatorKey(driver);
+            if (!string.IsNullOrEmpty(authKeyWithSpaces))
             {
-                string otpCode = GenerateOtpCode(authKey);
-                // Lưu key và mã OTP ra file hoặc log (tuỳ nhu cầu)
-                File.AppendAllText("authenticator_keys.txt", $"Key: {authKey} | OTP: {otpCode}\n");
-                Console.WriteLine($"Đã lưu key và mã OTP vào file authenticator_keys.txt");
+                // Loại bỏ khoảng trắng để tạo OTP (thư viện OtpNet yêu cầu key không có khoảng trắng)
+                string authKeyWithoutSpaces = authKeyWithSpaces.Replace(" ", "");
+                string otpCode = GenerateOtpCode(authKeyWithoutSpaces);
+                Console.WriteLine($"✅ Đã lưu key và mã OTP vào file authenticator_keys.txt");
+            }
+            else
+            {
+                Console.WriteLine("❌ Không thể lấy key Authenticator!");
             }
             // Ấn nút Next
             try
@@ -138,9 +152,11 @@ class Program
                 Thread.Sleep(1000);
                 Console.WriteLine("✅ Đã ấn nút Next sau khi lấy key Authenticator");
                 // Sau khi ấn Next, điền mã OTP và ấn Verify
-                if (!string.IsNullOrEmpty(authKey))
+                if (!string.IsNullOrEmpty(authKeyWithSpaces))
                 {
-                    string otpCode = GenerateOtpCode(authKey);
+                    // Sử dụng lại key không có khoảng trắng để tạo OTP
+                    string authKeyWithoutSpaces = authKeyWithSpaces.Replace(" ", "");
+                    string otpCode = GenerateOtpCode(authKeyWithoutSpaces);
                     FillAuthenticatorCodeAndVerify(driver, otpCode);
                     // Quay lại và xóa số điện thoại 2FA
                     Remove2FAPhoneNumber(driver);
@@ -411,9 +427,8 @@ class Program
         }
     }
 
-    static async Task HandleRequestSever(IWebDriver driver, string userNameParam, string passwordParam, string phoneNumber2FA)
+    static async Task<string> HandleRequestSever(IWebDriver driver, string userNameParam, string passwordParam)
     {
-        phoneNumber2FA = null;
         var client = new HttpClient();
         string url = "https://dailyotp.com/api/rent-number?appBrand=Google / Gmail / Youtube&countryCode=US&serverName=Server 1&api_key=4cdba4a83cb5e06bf4f81bb491f7a434vUo9b9CciGZ1VPPjbDcj";
 
@@ -423,9 +438,14 @@ class Program
             string jsonResponse = await response.Content.ReadAsStringAsync();
             var result = JsonSerializer.Deserialize<OtpResponse>(jsonResponse);
 
+            phoneNumber2FA = result.data.phoneNumber;
             Console.WriteLine($"Số thuê: {result.data.phoneNumber}");
+            Console.WriteLine($"Số đã thuê: {phoneNumber2FA}");
             Console.WriteLine($"transId: {result.data.transId}");
-
+            if(phoneNumber2FA == null || phoneNumber2FA == "")
+            {
+                Console.WriteLine("❌ Không có số điện thoại nào được thuê.");
+            }
             try
             {
                 IWebElement phoneInput = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
@@ -436,18 +456,18 @@ class Program
                 Thread.Sleep(1000);
 
                 ClickNextButton(driver);
-
                 await HandleGetCode(driver, result.data.transId, userNameParam, passwordParam);
-                phoneNumber2FA = result.data.phoneNumber; // Gán giá trị cho biến toàn cục
             }
             catch (Exception ex)
             {
                 Console.WriteLine("❌ Lỗi khi nhập số điện thoại hoặc nhấn Next: " + ex.Message);
             }
+            return result.data.phoneNumber;
         }
         else
         {
             Console.WriteLine("❌ Lỗi khi gọi API.");
+            return "";
         }
     }
 
@@ -679,26 +699,104 @@ class Program
         }
     }
 
-    static void ClickAddPhoneNumberButton(IWebDriver driver)
+    static void ClickAddPhoneNumberButton(IWebDriver driver, string phoneNumber)
     {
         try
         {
-            // Tìm nút Add phone number trên trang 2FA
-            IWebElement addPhoneBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
-                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Add phone number']]")));
+            Console.WriteLine("🔍 Đang tìm nút Add phone number...");
+            
+            // Đợi trang load hoàn toàn
+            Thread.Sleep(3000);
+            
+            IWebElement addPhoneBtn = null;
             IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
-            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", addPhoneBtn);
-            Thread.Sleep(200);
-            js.ExecuteScript("arguments[0].click();", addPhoneBtn);
-            Thread.Sleep(1000);
-            Console.WriteLine("✅ Đã ấn nút Add phone number trên trang 2FA");
+            
+            // Danh sách các XPath và CSS selector để tìm nút
+            var selectors = new[]
+            {
+                "//button[contains(text(), 'Add phone number')]",
+                "//button[.//span[contains(text(), 'Add phone number')]]",
+                "//button[.//div[contains(text(), 'Add phone number')]]",
+                "//button[@aria-label='Add phone number']",
+                "//button[@data-action='add-phone']",
+                "//div[contains(@class, 'add-phone')]//button",
+                "//button[contains(@class, 'add-phone')]",
+                "//a[contains(text(), 'Add phone number')]",
+                "//span[contains(text(), 'Add phone number')]/parent::button",
+                "//div[contains(text(), 'Add phone number')]/parent::button"
+            };
+            foreach (var selector in selectors)
+            {
+                try
+                {
+                    Console.WriteLine($"🔍 Thử selector: {selector}");
+                    addPhoneBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(3))
+                        .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath(selector)));
+                    
+                    if (addPhoneBtn != null)
+                    {
+                        break;
+                    }
+                }
+                catch
+                {
+                    continue;
+                }
+            }
+            bool clickSuccess = false;
+            
+            // Cách 1: Click bằng JavaScript
+            try
+            {
+                Console.WriteLine("🖱️ Thử click bằng JavaScript...");
+                js.ExecuteScript("arguments[0].click();", addPhoneBtn);
+                clickSuccess = true;
+                Console.WriteLine("✅ Click thành công bằng JavaScript");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Click JavaScript thất bại: {ex.Message}");
+            }
+            
+            // Cách 2: Click bằng Actions
+            if (!clickSuccess)
+            {
+                try
+                {
+                    Console.WriteLine("🖱️ Thử click bằng Actions...");
+                    var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                    actions.MoveToElement(addPhoneBtn).Click().Perform();
+                    clickSuccess = true;
+                    Console.WriteLine("✅ Click thành công bằng Actions");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Click Actions thất bại: {ex.Message}");
+                }
+            }
+            
+            // Cách 3: Click thường
+            if (!clickSuccess)
+            {
+                try
+                {
+                    Console.WriteLine("🖱️ Thử click thường...");
+                    addPhoneBtn.Click();
+                    clickSuccess = true;
+                    Console.WriteLine("✅ Click thành công bằng Selenium");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Click thường thất bại: {ex.Message}");
+                }
+            }
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"❌ Không ấn được nút Add phone number: {ex.Message}");
+            Console.WriteLine($"❌ Lỗi trong ClickAddPhoneNumberButton: {ex.Message}");
+            Console.WriteLine($"📄 Stack trace: {ex.StackTrace}");
         }
     }
-
     static void Fill2FAPhoneAndNext(IWebDriver driver, string phoneNumber)
     {
         try
@@ -793,15 +891,145 @@ class Program
     {
         try
         {
-            // Đợi popup QR xuất hiện và tìm link Can't scan it?
-            IWebElement cantScanLink = new WebDriverWait(driver, TimeSpan.FromSeconds(20))
-                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//a[contains(text(), \"Can't scan it\")]")));
-            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
-            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", cantScanLink);
-            Thread.Sleep(200);
-            js.ExecuteScript("arguments[0].click();", cantScanLink);
-            Thread.Sleep(1000);
-            Console.WriteLine("✅ Đã click vào link Can't scan it?");
+            Console.WriteLine("🔍 Đang tìm link 'Can't scan it?'...");
+            
+            // Thử nhiều cách tìm link khác nhau
+            IWebElement cantScanLink = null;
+            var linkSelectors = new[]
+            {
+                // Target chính xác button có jsname="Pr7Yme"
+                "//button[@jsname='Pr7Yme']",
+                // Target span có jsname="V67aGc" chứa text "Can't scan it?"
+                "//span[@jsname='V67aGc']",
+                // Target button chứa span có text "Can't scan it?"
+                "//button[.//span[contains(text(), \"Can't scan it?\")]]",
+                "//button[.//span[contains(text(), 'Can\\'t scan it?')]]",
+                // Fallback selectors
+                "//button[contains(text(), \"Can't scan it?\")]",
+                "//button[contains(text(), 'Can\\'t scan it?')]",
+                "//button[contains(text(), 'scan')]",
+                "//button[contains(text(), 'Scan')]",
+                "//span[contains(text(), 'scan')]/parent::button",
+                "//span[contains(text(), 'Scan')]/parent::button",
+                "//*[contains(text(), 'scan') and (self::a or self::button)]",
+                "//*[contains(text(), 'Scan') and (self::a or self::button)]"
+            };
+            
+            foreach (var selector in linkSelectors)
+            {
+                try
+                {
+                    Console.WriteLine($"🔍 Thử selector: {selector}");
+                    cantScanLink = new WebDriverWait(driver, TimeSpan.FromSeconds(3))
+                        .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath(selector)));
+                    
+                    if (cantScanLink != null)
+                    {
+                        break;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    continue;
+                }
+            }
+            
+            
+            if (cantScanLink != null)
+            {
+                IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+                    // Thử cách cuối cùng - click vào tọa độ
+                    try
+                    {
+                        Console.WriteLine("🖱️ Thử click vào tọa độ...");
+                        var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                        actions.MoveToElement(cantScanLink).Click().Perform();
+                        Thread.Sleep(1000);
+                        Console.WriteLine("✅ Đã click vào tọa độ thành công");
+                    }
+                    catch (Exception ex2)
+                    {
+                        Console.WriteLine($"❌ Tất cả phương pháp click đều thất bại: {ex2.Message}");
+                    }
+                
+                 // Thử cách cuối cùng - di chuột đến tọa độ cụ thể và click
+                    try
+                    {
+                        Console.WriteLine("🖱️ Thử di chuột đến tọa độ cụ thể...");
+                        var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                        
+                        // Lấy vị trí và kích thước của element
+                        var location = cantScanLink.Location;
+                        var size = cantScanLink.Size;
+                        Console.WriteLine($"📍 Element location: {location}, size: {size}");
+                        
+                        // Di chuột đến giữa element
+                        var centerX = location.X + (size.Width / 2);
+                        var centerY = location.Y + (size.Height / 2);
+                        Console.WriteLine($"🎯 Click tại tọa độ: ({centerX}, {centerY})");
+                        
+                        // Di chuột đến tọa độ và click
+                        actions.MoveByOffset(centerX, centerY).Click().Perform();
+                        Thread.Sleep(1000);
+                        Console.WriteLine("✅ Đã click tại tọa độ cụ thể thành công");
+                    }
+                    catch (Exception ex2)
+                    {
+                        Console.WriteLine($"⚠️ Click tọa độ thất bại: {ex2.Message}");
+                        
+                        // Thử cách cuối cùng - hover trước rồi click
+                        try
+                        {
+                            Console.WriteLine("🖱️ Thử hover trước rồi click...");
+                            var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                            
+                            // Hover vào element trước
+                            actions.MoveToElement(cantScanLink).Perform();
+                            Thread.Sleep(500);
+                            
+                            // Sau đó click
+                            actions.Click().Perform();
+                            Thread.Sleep(1000);
+                            Console.WriteLine("✅ Đã hover và click thành công");
+                        }
+                        catch (Exception ex3)
+                        {
+                            Console.WriteLine($"❌ Tất cả phương pháp click đều thất bại: {ex3.Message}");
+                        }
+                    }
+            }
+            else
+            {
+                Console.WriteLine("🔍 Tìm kiếm tất cả button có chứa 'scan'...");
+                try
+                {
+                    var allButtons = driver.FindElements(By.TagName("button"));
+                    Console.WriteLine($"📝 Tìm thấy {allButtons.Count} button trên trang");
+
+                    foreach (var button in allButtons)
+                    {
+                        try
+                        {
+                            string buttonText = button.Text.ToLower().Trim();
+                            string buttonJsName = button.GetAttribute("jsname");
+                            Console.WriteLine($"🔍 Button: Text='{buttonText}', jsname='{buttonJsName}'");
+
+                            if (buttonText.Contains("scan") || buttonText.Contains("can't") || buttonText.Contains("cant") ||
+                                buttonJsName == "Pr7Yme")
+                            {
+                                cantScanLink = button;
+                                Console.WriteLine($"✅ Tìm thấy button phù hợp: {buttonText} (jsname: {buttonJsName})");
+                                break;
+                            }
+                        }
+                        catch { continue; }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Không tìm thấy button nào: {ex.Message}");
+                }
+            }
         }
         catch (Exception ex)
         {
@@ -813,27 +1041,154 @@ class Program
     {
         try
         {
-            // Lấy text popup chứa key
-            IWebElement popup = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
-                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//div[contains(text(),'Enter your email address and this key')]")));
-            string popupText = popup.Text;
-            // Regex tìm key (dạng nhiều nhóm ký tự, có thể có khoảng trắng)
-            var match = System.Text.RegularExpressions.Regex.Match(popupText, @"([a-z0-9]{4,}\s+){3,}[a-z0-9]{4,}", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-            if (match.Success)
+            Console.WriteLine("🔍 Đang tìm popup chứa key Authenticator...");
+            
+            // Đợi popup xuất hiện và tìm element chứa key
+            IWebElement popup = null;
+            string popupText = "";
+            
+            // Thử nhiều cách tìm popup khác nhau
+            var popupSelectors = new[]
             {
-                string key = match.Value.Replace(" ", "").Trim();
-                Console.WriteLine($"✅ Đã lấy key Authenticator: {key}");
-                return key;
+                "//div[contains(text(),'Enter your email address and this key')]",
+                "//div[contains(text(),'this key')]",
+                "//div[contains(text(),'setup key')]",
+                "//div[contains(@class,'dialog') and contains(text(),'key')]",
+                "//div[contains(@class,'popup') and contains(text(),'key')]",
+                "//div[contains(@class,'modal') and contains(text(),'key')]",
+            };
+            
+            foreach (var selector in popupSelectors)
+            {
+                try
+                {
+                    Console.WriteLine($"🔍 Thử selector: {selector}");
+                    popup = new WebDriverWait(driver, TimeSpan.FromSeconds(3))
+                        .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath(selector)));
+                    
+                    if (popup != null)
+                    {
+                        popupText = popup.Text;
+                        Console.WriteLine($"✅ Tìm thấy popup với selector: {selector}");
+                        Console.WriteLine($"📄 Nội dung popup: {popupText}");
+                        break;
+                    }
+                }
+                catch
+                {
+                    Console.WriteLine($"⚠️ Selector không tìm thấy: {selector}");
+                    continue;
+                }
             }
-            else
+            
+            // Nếu vẫn không tìm thấy, thử tìm tất cả div có chứa text
+            if (popup == null)
             {
-                Console.WriteLine("❌ Không tìm thấy key Authenticator trong popup!");
+                Console.WriteLine("🔍 Tìm kiếm tất cả div có chứa key...");
+                try
+                {
+                    var allDivs = driver.FindElements(By.TagName("div"));
+                    foreach (var div in allDivs)
+                    {
+                        try
+                        {
+                            string divText = div.Text;
+                            if (divText.Contains("key") && (divText.Contains("f5b6") || divText.Contains("lv3k") || divText.Contains("vbah")))
+                            {
+                                popup = div;
+                                popupText = divText;
+                                Console.WriteLine($"✅ Tìm thấy div chứa key: {divText}");
+                                break;
+                            }
+                        }
+                        catch
+                        {
+                            continue;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Lỗi khi tìm div: {ex.Message}");
+                }
+            }
+            
+            if (popup == null || string.IsNullOrEmpty(popupText))
+            {
+                Console.WriteLine("❌ Không tìm thấy popup chứa key Authenticator!");
+                Console.WriteLine("🔍 Đang in ra toàn bộ HTML để debug...");
+                try
+                {
+                    string pageSource = driver.PageSource;
+                    Console.WriteLine($"📄 Độ dài HTML: {pageSource.Length} ký tự");
+                    
+                    // Tìm kiếm các từ khóa liên quan
+                    if (pageSource.Contains("key") || pageSource.Contains("f5b6") || pageSource.Contains("lv3k"))
+                    {
+                        Console.WriteLine("✅ Tìm thấy từ khóa liên quan trong HTML");
+                        // In ra phần HTML chứa từ khóa
+                        int keyIndex = pageSource.IndexOf("key", StringComparison.OrdinalIgnoreCase);
+                        if (keyIndex >= 0 && keyIndex < pageSource.Length - 500)
+                        {
+                            Console.WriteLine($"📄 HTML xung quanh 'key': {pageSource.Substring(keyIndex, 500)}");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Không thể lấy HTML: {ex.Message}");
+                }
                 return null;
             }
+            
+            // Cải thiện regex để tìm key chính xác hơn
+            // Pattern cho key dạng: f5b6 lv3k vbah k5dq bo5f be6j 4vs5 2h36
+            var patterns = new[]
+            {
+                @"([a-z0-9]{4}\s+){7}[a-z0-9]{4}", // Pattern chính xác cho key 32 ký tự
+                @"([a-z0-9]{4,}\s+){3,}[a-z0-9]{4,}", // Pattern linh hoạt hơn
+                @"[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}", // Pattern cụ thể
+                @"\b[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\b" // Pattern với word boundary
+            };
+            
+            foreach (var pattern in patterns)
+            {
+                try
+                {
+                    Console.WriteLine($"🔍 Thử pattern: {pattern}");
+                    var match = System.Text.RegularExpressions.Regex.Match(popupText, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    if (match.Success)
+                    {
+                        string keyWithSpaces = match.Value.Trim();
+                        string keyWithoutSpaces = keyWithSpaces.Replace(" ", "");
+                        Console.WriteLine($"✅ Đã lấy key Authenticator: {keyWithoutSpaces}");
+                        Console.WriteLine($"📝 Key gốc với khoảng trắng: {keyWithSpaces}");
+                        
+                        // Kiểm tra độ dài key (thường là 32 ký tự)
+                        if (keyWithoutSpaces.Length == 32)
+                        {
+                            Console.WriteLine($"✅ Key có độ dài hợp lệ: {keyWithoutSpaces.Length} ký tự");
+                            return keyWithSpaces; // Trả về key với khoảng trắng
+                        }
+                        else
+                        {
+                            Console.WriteLine($"⚠️ Key có độ dài không chuẩn: {keyWithoutSpaces.Length} ký tự");
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Lỗi với pattern {pattern}: {ex.Message}");
+                }
+            }
+            Console.WriteLine("❌ Không tìm thấy key Authenticator trong popup!");
+            Console.WriteLine($"📄 Nội dung popup đầy đủ: {popupText}");
+            return null;
         }
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Lỗi khi lấy key Authenticator: {ex.Message}");
+            Console.WriteLine($"📄 Stack trace: {ex.StackTrace}");
             return null;
         }
     }
@@ -905,51 +1260,459 @@ class Program
         }
     }
 
+    // Menu quản lý proxy và fingerprint
+    static async Task ShowProxyMenu()
+    {
+        while (true)
+        {
+            Console.WriteLine("\n=== MENU QUẢN LÝ PROXY & FINGERPRINT ===");
+            Console.WriteLine("1. Xem danh sách proxy hiện tại");
+            Console.WriteLine("2. Test tất cả proxy");
+            Console.WriteLine("3. Thêm proxy mới");
+            Console.WriteLine("4. Tải lại danh sách proxy từ file");
+            Console.WriteLine("5. Xóa dữ liệu Chrome (xóa fingerprint cũ)");
+            Console.WriteLine("6. Tạo fingerprint mới và test");
+            Console.WriteLine("7. Bắt đầu tạo tài khoản Gmail");
+            Console.WriteLine("0. Thoát");
+            Console.Write("Chọn tùy chọn: ");
+
+            string choice = Console.ReadLine();
+            Console.WriteLine();
+
+            switch (choice)
+            {
+                case "1":
+                    ShowProxyList();
+                    break;
+                case "2":
+                    await TestAllProxies();
+                    break;
+                case "3":
+                    AddNewProxy();
+                    break;
+                case "4":
+                    _proxyManager.LoadProxies();
+                    break;
+                case "5":
+                    ClearChromeData();
+                    break;
+                case "6":
+                    TestNewFingerprint();
+                    break;
+                case "7":
+                    return; // Thoát menu và tiếp tục chương trình
+                case "0":
+                    Environment.Exit(0);
+                    break;
+                default:
+                    Console.WriteLine("❌ Lựa chọn không hợp lệ!");
+                    break;
+            }
+        }
+    }
+
+    static void ShowProxyList()
+    {
+        var proxies = _proxyManager.GetAllProxies();
+        if (proxies.Count == 0)
+        {
+            Console.WriteLine("📝 Không có proxy nào trong danh sách");
+            return;
+        }
+
+        Console.WriteLine($"📋 Danh sách {proxies.Count} proxy:");
+        for (int i = 0; i < proxies.Count; i++)
+        {
+            Console.WriteLine($"{i + 1}. {proxies[i]}");
+        }
+    }
+
+    static async Task TestAllProxies()
+    {
+        Console.WriteLine("🔍 Bắt đầu test tất cả proxy...");
+        var workingProxies = await _proxyManager.TestAllProxies();
+        
+        if (workingProxies.Count == 0)
+        {
+            Console.WriteLine("⚠️ Không có proxy nào hoạt động!");
+        }
+        else
+        {
+            Console.WriteLine($"✅ Có {workingProxies.Count} proxy hoạt động");
+        }
+    }
+
+    static void AddNewProxy()
+    {
+        Console.Write("Nhập host proxy (VD: 192.168.1.100): ");
+        string host = Console.ReadLine()?.Trim();
+        
+        if (string.IsNullOrEmpty(host))
+        {
+            Console.WriteLine("❌ Host không được để trống!");
+            return;
+        }
+
+        Console.Write("Nhập port proxy (VD: 8080): ");
+        if (!int.TryParse(Console.ReadLine(), out int port) || port <= 0 || port > 65535)
+        {
+            Console.WriteLine("❌ Port không hợp lệ!");
+            return;
+        }
+
+        Console.Write("Proxy có cần xác thực không? (y/n): ");
+        bool needAuth = Console.ReadLine()?.ToLower().StartsWith("y") == true;
+
+        string username = null;
+        string password = null;
+
+        if (needAuth)
+        {
+            Console.Write("Nhập username: ");
+            username = Console.ReadLine()?.Trim();
+            
+            Console.Write("Nhập password: ");
+            password = Console.ReadLine()?.Trim();
+
+            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
+            {
+                Console.WriteLine("❌ Username và password không được để trống!");
+                return;
+            }
+        }
+
+        _proxyManager.AddProxy(host, port, username, password);
+        Console.WriteLine("✅ Đã thêm proxy thành công!");
+    }
+
+    static void ClearChromeData()
+    {
+        Console.WriteLine("🗑️ Bắt đầu xóa dữ liệu Chrome...");
+        Console.WriteLine("⚠️ Điều này sẽ xóa tất cả profile, cache và fingerprint cũ!");
+        Console.Write("Bạn có chắc chắn muốn tiếp tục? (y/n): ");
+        
+        if (Console.ReadLine()?.ToLower().StartsWith("y") == true)
+        {
+            FingerprintManager.ClearChromeData();
+            Console.WriteLine("✅ Đã xóa dữ liệu Chrome thành công!");
+            Console.WriteLine("🔄 Bây giờ bạn có thể tạo fingerprint mới hoàn toàn");
+        }
+        else
+        {
+            Console.WriteLine("❌ Đã hủy xóa dữ liệu Chrome");
+        }
+    }
+
+    static void TestNewFingerprint()
+    {
+        Console.WriteLine("🧪 Bắt đầu test fingerprint mới...");
+        
+        try
+        {
+            // Hiển thị danh sách profile có sẵn
+            FingerprintManager.ShowAvailableProfiles();
+            
+            Console.WriteLine("\n🎯 Chọn loại fingerprint để test:");
+            Console.WriteLine("1. Windows Desktop");
+            Console.WriteLine("2. Mac Desktop");
+            Console.WriteLine("3. Linux Desktop");
+            Console.WriteLine("4. Android Mobile");
+            Console.WriteLine("5. iOS Mobile");
+            Console.WriteLine("6. European Desktop");
+            Console.WriteLine("7. Asian Desktop");
+            Console.WriteLine("8. Gaming Desktop");
+            Console.WriteLine("9. Business Desktop");
+            Console.WriteLine("10. Student Laptop");
+            Console.WriteLine("11. Random Profile (từ danh sách)");
+            Console.WriteLine("12. Random Generated (hoàn toàn ngẫu nhiên)");
+            
+            Console.Write("\n📝 Nhập lựa chọn (1-12): ");
+            string choice = Console.ReadLine();
+            
+            FingerprintInfo fingerprint = null;
+            
+            switch (choice)
+            {
+                case "1":
+                    fingerprint = FingerprintManager.GetWindowsProfile();
+                    break;
+                case "2":
+                    fingerprint = FingerprintManager.GetMacProfile();
+                    break;
+                case "3":
+                    fingerprint = FingerprintManager.GetLinuxProfile();
+                    break;
+                case "4":
+                    fingerprint = FingerprintManager.GetAndroidProfile();
+                    break;
+                case "5":
+                    fingerprint = FingerprintManager.GetIOSProfile();
+                    break;
+                case "6":
+                    fingerprint = FingerprintManager.GetEuropeanProfile();
+                    break;
+                case "7":
+                    fingerprint = FingerprintManager.GetAsianProfile();
+                    break;
+                case "8":
+                    fingerprint = FingerprintManager.GetGamingProfile();
+                    break;
+                case "9":
+                    fingerprint = FingerprintManager.GetBusinessProfile();
+                    break;
+                case "10":
+                    fingerprint = FingerprintManager.GetStudentProfile();
+                    break;
+                case "11":
+                    fingerprint = FingerprintManager.GetRandomProfile();
+                    break;
+                case "12":
+                    fingerprint = FingerprintManager.GenerateRandomFingerprint();
+                    break;
+                default:
+                    Console.WriteLine("❌ Lựa chọn không hợp lệ! Sử dụng fingerprint ngẫu nhiên.");
+                    fingerprint = FingerprintManager.GetRandomProfile();
+                    break;
+            }
+            
+            Console.WriteLine($"\n📱 Fingerprint được chọn: {fingerprint.ProfileName}");
+            Console.WriteLine($"🌐 User Agent: {fingerprint.UserAgent}");
+            Console.WriteLine($"🌍 Ngôn ngữ: {fingerprint.Language}");
+            Console.WriteLine($"🖥️ Platform: {fingerprint.Platform}");
+            Console.WriteLine($"📺 Độ phân giải: {fingerprint.ScreenResolution}");
+            Console.WriteLine($"⏰ Timezone: {fingerprint.Timezone}");
+            Console.WriteLine($"💾 Memory: {fingerprint.DeviceMemory}GB");
+            Console.WriteLine($"🔧 CPU Cores: {fingerprint.HardwareConcurrency}");
+            Console.WriteLine($"🎮 GPU: {fingerprint.WebGLRenderer}");
+            
+            // Tạo Chrome options với fingerprint mới
+            ChromeOptions options = new ChromeOptions();
+            FingerprintManager.ConfigureChromeOptions(options, fingerprint);
+            
+            Console.WriteLine("\n✅ Đã tạo fingerprint mới thành công!");
+            Console.WriteLine("🔍 Bạn có thể test bằng cách mở Chrome với fingerprint này");
+            Console.WriteLine("💡 Tip: Sử dụng fingerprint này trong automation để tránh bị phát hiện!");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Lỗi khi tạo fingerprint mới: {ex.Message}");
+        }
+    }
+
+    static void InjectAntiDetectionScripts(IWebDriver driver)
+    {
+        try
+        {
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            
+            // 1. Ẩn webdriver property
+            js.ExecuteScript(@"
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined,
+                });
+            ");
+
+            // 2. Thay đổi user agent
+            js.ExecuteScript(@"
+                Object.defineProperty(navigator, 'userAgent', {
+                    get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                });
+            ");
+
+            // 3. Thay đổi platform
+            js.ExecuteScript(@"
+                Object.defineProperty(navigator, 'platform', {
+                    get: () => 'Win32',
+                });
+            ");
+
+            // 4. Thay đổi language
+            js.ExecuteScript(@"
+                Object.defineProperty(navigator, 'language', {
+                    get: () => 'en-US',
+                });
+            ");
+
+            // 5. Thay đổi languages array
+            js.ExecuteScript(@"
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en'],
+                });
+            ");
+
+            // 6. Ẩn automation properties
+            js.ExecuteScript(@"
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
+            ");
+
+            // 7. Thay đổi permissions
+            js.ExecuteScript(@"
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+            ");
+
+            // 8. Thay đổi plugins
+            js.ExecuteScript(@"
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5],
+                });
+            ");
+
+            // 9. Thay đổi mimeTypes
+            js.ExecuteScript(@"
+                Object.defineProperty(navigator, 'mimeTypes', {
+                    get: () => [1, 2, 3, 4, 5],
+                });
+            ");
+
+            // 10. Thay đổi hardwareConcurrency
+            js.ExecuteScript(@"
+                Object.defineProperty(navigator, 'hardwareConcurrency', {
+                    get: () => 8,
+                });
+            ");
+
+            // 11. Thay đổi deviceMemory
+            js.ExecuteScript(@"
+                Object.defineProperty(navigator, 'deviceMemory', {
+                    get: () => 8,
+                });
+            ");
+
+            // 12. Thay đổi connection
+            js.ExecuteScript(@"
+                Object.defineProperty(navigator, 'connection', {
+                    get: () => ({
+                        effectiveType: '4g',
+                        rtt: 50,
+                        downlink: 10,
+                        saveData: false
+                    }),
+                });
+            ");
+
+            // 13. Thay đổi chrome object
+            js.ExecuteScript(@"
+                window.chrome = {
+                    runtime: {},
+                };
+            ");
+
+            // 14. Thay đổi permissions API
+            js.ExecuteScript(@"
+                const originalQuery = window.navigator.permissions.query;
+                return window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+            ");
+
+            Console.WriteLine("✅ Đã inject thành công các script chống phát hiện automation");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi inject anti-detection scripts: {ex.Message}");
+        }
+    }
+
     // Hàm mô phỏng thao tác người dùng thật: di chuột, rê chuột, cuộn trang, click linh tinh, delay ngẫu nhiên
     static void HumanLikeActions(IWebDriver driver)
     {
         Random rnd = new Random();
-        int actionCount = rnd.Next(2, 5); // Số lần thực hiện hành động linh tinh
+        int actionCount = rnd.Next(3, 7); // Tăng số lần thực hiện hành động
         int width = driver.Manage().Window.Size.Width;
         int height = driver.Manage().Window.Size.Height;
 
+        // Thêm thao tác mô phỏng người dùng thật hơn
         for (int i = 0; i < actionCount; i++)
         {
-            int actionType = rnd.Next(0, 4);
+            int actionType = rnd.Next(0, 8); // Tăng số loại hành động
             switch (actionType)
             {
-                case 0: // Di chuột đến vị trí ngẫu nhiên
+                case 0: // Di chuột đến vị trí ngẫu nhiên với tốc độ thay đổi
                     int x = rnd.Next(0, width);
                     int y = rnd.Next(0, height);
                     try
                     {
                         var actions = new OpenQA.Selenium.Interactions.Actions(driver);
                         actions.MoveByOffset(x, y).Perform();
+                        Thread.Sleep(rnd.Next(100, 500)); // Delay ngẫu nhiên
                     }
                     catch { }
                     break;
-                case 1: // Cuộn trang ngẫu nhiên
+                case 1: // Cuộn trang ngẫu nhiên với tốc độ khác nhau
                     int scrollY = rnd.Next(50, 400);
-                    ((IJavaScriptExecutor)driver).ExecuteScript($"window.scrollBy(0, {scrollY});");
+                    int scrollSpeed = rnd.Next(100, 300);
+                    ((IJavaScriptExecutor)driver).ExecuteScript($"window.scrollBy({{top: {scrollY}, left: 0, behavior: 'smooth'}});");
+                    Thread.Sleep(scrollSpeed);
                     break;
                 case 2: // Click linh tinh vào vị trí ngẫu nhiên (tránh click vào các trường nhập liệu)
-                    var body = driver.FindElement(By.TagName("body"));
                     try
                     {
+                        var body = driver.FindElement(By.TagName("body"));
                         var actions = new OpenQA.Selenium.Interactions.Actions(driver);
                         actions.MoveToElement(body, rnd.Next(0, width), rnd.Next(0, height)).Click().Perform();
                     }
                     catch { }
                     break;
                 case 3: // Dừng lại ngẫu nhiên (giả vờ đọc)
-                    int pause = rnd.Next(800, 2500);
+                    int pause = rnd.Next(800, 3000);
                     Thread.Sleep(pause);
+                    break;
+                case 4: // Di chuột theo đường cong (mô phỏng người dùng thật)
+                    try
+                    {
+                        var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                        for (int j = 0; j < 5; j++)
+                        {
+                            int curveX = rnd.Next(0, width);
+                            int curveY = rnd.Next(0, height);
+                            actions.MoveByOffset(curveX, curveY).Perform();
+                            Thread.Sleep(rnd.Next(50, 200));
+                        }
+                    }
+                    catch { }
+                    break;
+                case 5: // Cuộn ngang ngẫu nhiên
+                    int scrollX = rnd.Next(-100, 100);
+                    ((IJavaScriptExecutor)driver).ExecuteScript($"window.scrollBy({{top: 0, left: {scrollX}, behavior: 'smooth'}});");
+                    Thread.Sleep(rnd.Next(200, 600));
+                    break;
+                case 6: // Hover chuột trên các element ngẫu nhiên
+                    try
+                    {
+                        var elements = driver.FindElements(By.TagName("div"));
+                        if (elements.Count > 0)
+                        {
+                            var randomElement = elements[rnd.Next(0, Math.Min(elements.Count, 10))];
+                            var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                            actions.MoveToElement(randomElement).Perform();
+                            Thread.Sleep(rnd.Next(300, 800));
+                        }
+                    }
+                    catch { }
+                    break;
+                case 7: // Thay đổi focus ngẫu nhiên
+                    try
+                    {
+                        ((IJavaScriptExecutor)driver).ExecuteScript("document.activeElement.blur();");
+                        Thread.Sleep(rnd.Next(200, 500));
+                        ((IJavaScriptExecutor)driver).ExecuteScript("document.body.focus();");
+                    }
+                    catch { }
                     break;
             }
             // Delay ngẫu nhiên giữa các hành động
-            Thread.Sleep(rnd.Next(300, 1200));
+            Thread.Sleep(rnd.Next(200, 800));
         }
         // Dừng lại lâu hơn ở cuối
-        Thread.Sleep(rnd.Next(1000, 2500));
+        Thread.Sleep(rnd.Next(1500, 3500));
     }
 }

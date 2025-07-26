@@ -1,0 +1,11 @@
+# File cấu hình proxy cho RegMail
+# Format: host:port hoặc host:port:username:password
+# Mỗi dòng một proxy, dòng bắt đầu bằng # là comment
+
+# Ví dụ proxy không cần xác thực:
+# 192.168.1.100:8080
+
+# Ví dụ proxy cần xác thực:
+# 192.168.1.100:8080:username:password
+
+# Thêm proxy của bạn vào đây:
