@@ -1,9 +1,11 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Support.UI;
+using OpenQA.Selenium.Interactions;
 using System.Threading;
 using System.Net.Http;
 using System.Text.Json;
@@ -36,6 +38,9 @@ class Program
 {
     private static ProxyManager _proxyManager;
     private static string phoneNumber2FA;
+    private static string currentAuthenticatorKey; // Lưu key cho Gmail hiện tại
+    private static string currentGmail; // Lưu Gmail hiện tại
+    private static string currentPassword; // Lưu password hiện tại
     static async Task Main()
     {
         Console.OutputEncoding = Encoding.UTF8;
@@ -64,6 +69,12 @@ class Program
             int posX = i * (width + spacing);
             int posY = 100;
 
+            // Reset các biến global cho Gmail mới
+            phoneNumber2FA = "";
+            currentGmail = "";
+            currentPassword = "";
+            currentAuthenticatorKey = "";
+            
             ChromeOptions options = new ChromeOptions();
             options.AddArgument("--guest");
             options.AddArgument("--new-window");
@@ -109,6 +120,11 @@ class Program
 
             string email = FillUsername(driver, firstName, lastName);
             string password = FillPassword(driver);
+            
+            // Lưu Gmail và password vào biến global
+            currentGmail = email;
+            currentPassword = password;
+            
             ClickNextButton(driver);
 
             await HandleRequestSever(driver, email, password);
@@ -123,50 +139,13 @@ class Program
             Fill2FAPhoneAndNext(driver, phoneNumber2FA);
             ClickConfirmPhoneSaveButton(driver);
             ClickDoneButtonAfterPhoneVerify(driver);
-            // Truy cập vào Authenticator app và click setup
             GoToAuthenticatorAppAndSetup(driver);
-            // Đợi popup QR và click Can't scan it
             ClickCantScanItLink(driver);
-            // Lấy key, tạo mã OTP, lưu lại và ấn Next
             string authKeyWithSpaces = ExtractAuthenticatorKey(driver);
-            if (!string.IsNullOrEmpty(authKeyWithSpaces))
-            {
-                // Loại bỏ khoảng trắng để tạo OTP (thư viện OtpNet yêu cầu key không có khoảng trắng)
-                string authKeyWithoutSpaces = authKeyWithSpaces.Replace(" ", "");
-                string otpCode = GenerateOtpCode(authKeyWithoutSpaces);
-                Console.WriteLine($"✅ Đã lưu key và mã OTP vào file authenticator_keys.txt");
-            }
-            else
-            {
-                Console.WriteLine("❌ Không thể lấy key Authenticator!");
-            }
-            // Ấn nút Next
-            try
-            {
-                IWebElement nextBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
-                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Next']]")));
-                IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
-                js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextBtn);
-                Thread.Sleep(200);
-                js.ExecuteScript("arguments[0].click();", nextBtn);
-                Thread.Sleep(1000);
-                Console.WriteLine("✅ Đã ấn nút Next sau khi lấy key Authenticator");
-                // Sau khi ấn Next, điền mã OTP và ấn Verify
-                if (!string.IsNullOrEmpty(authKeyWithSpaces))
-                {
-                    // Sử dụng lại key không có khoảng trắng để tạo OTP
-                    string authKeyWithoutSpaces = authKeyWithSpaces.Replace(" ", "");
-                    string otpCode = GenerateOtpCode(authKeyWithoutSpaces);
-                    FillAuthenticatorCodeAndVerify(driver, otpCode);
-                    // Quay lại và xóa số điện thoại 2FA
-                    Remove2FAPhoneNumber(driver);
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Không ấn được nút Next sau khi lấy key Authenticator: {ex.Message}");
-            }
-
+            UpdateAuthenticatorKeyInExcel(currentGmail, authKeyWithSpaces);
+            ClickNextButtonAfterAuthenticatorKey(driver, authKeyWithSpaces);
+            Thread.Sleep(3000);
+            Remove2FAPhoneNumber(driver);
         }
     }
 
@@ -307,6 +286,26 @@ class Program
             {
                 Console.WriteLine($"❌ Vẫn không click được Next: {retryEx.Message}");
             }
+        }
+    }
+    
+    static void ClickReviewNextButton(IWebDriver driver)
+    {
+        try
+        {
+            // Tìm nút Next trên màn hình Review your account info
+            IWebElement nextButton = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Next']]")));
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButton);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", nextButton);
+            Thread.Sleep(1000);
+            Console.WriteLine("✅ Đã ấn nút Next ở màn hình Review account info");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Không ấn được nút Next ở màn hình Review account info: {ex.Message}");
         }
     }
 
@@ -504,7 +503,8 @@ class Program
                         Thread.Sleep(1000);
 
                         ClickNextButton(driver);
-                        HandleWriteExcel(userNameParam, passwordParam);
+                        // Ghi vào Excel với Authenticator Key
+                        HandleWriteExcel(currentGmail, currentPassword, currentAuthenticatorKey);
                     }
                     catch (Exception ex)
                     {
@@ -534,7 +534,7 @@ class Program
         }
     }
 
-    static void HandleWriteExcel(string userNameParam, string passwordParam)
+    static void HandleWriteExcel(string userNameParam, string passwordParam, string authenticatorKey = null)
     {
         // Đường dẫn tới file Excel có sẵn
         string filePath = @"C:\Users\lqanh\OneDrive\ドキュメント\Reg\TestWriteInExel\ExcelDataGmailData.xlsx";
@@ -560,18 +560,87 @@ class Program
                 }
 
                 // Ghi dữ liệu vào dòng trống
-                worksheet.Cell(currentRow, 1).Value = userNameParam;
-                worksheet.Cell(currentRow, 2).Value = passwordParam;
+                worksheet.Cell(currentRow, 1).Value = userNameParam; // Cột A: Gmail
+                worksheet.Cell(currentRow, 2).Value = passwordParam; // Cột B: Password
+                
+                // Ghi Authenticator Key vào cột C (cột 3)
+                string keyToWrite = authenticatorKey ?? currentAuthenticatorKey;
+                if (!string.IsNullOrEmpty(keyToWrite))
+                {
+                    worksheet.Cell(currentRow, 3).Value = keyToWrite;
+                    Console.WriteLine($"🔑 Đã ghi Authenticator Key vào cột C: {keyToWrite}");
+                }
+                else
+                {
+                    Console.WriteLine("⚠️ Không có Authenticator Key để ghi vào Excel");
+                }
 
                 // Lưu file
                 workbook.Save();
                 Console.WriteLine("✅ Đã ghi dữ liệu vào Excel!");
+                Console.WriteLine($"📊 Gmail: {userNameParam} | Password: {passwordParam} | Key: {keyToWrite ?? "N/A"}");
               
             }
         }
         catch (IOException ex)
         {
             Console.WriteLine("❌ Không thể ghi vào file Excel. Có thể đang mở file. Chi tiết: " + ex.Message);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Lỗi khi ghi Excel: {ex.Message}");
+        }
+    }
+
+    // Hàm cập nhật Authenticator Key cho Gmail đã tồn tại
+    static void UpdateAuthenticatorKeyInExcel(string userNameParam, string authenticatorKey)
+    {
+        string filePath = @"C:\Users\lqanh\OneDrive\ドキュメント\Reg\TestWriteInExel\ExcelDataGmailData.xlsx";
+
+        if (!File.Exists(filePath))
+        {
+            Console.WriteLine("❌ File Excel không tồn tại tại đường dẫn: " + filePath);
+            return;
+        }
+
+        try
+        {
+            using (var workbook = new XLWorkbook(filePath))
+            {
+                var worksheet = workbook.Worksheet(1);
+
+                // Tìm dòng chứa Gmail cần cập nhật
+                int rowToUpdate = -1;
+                for (int row = 2; row <= 1000; row++) // Giới hạn tìm trong 1000 dòng đầu
+                {
+                    string existingGmail = worksheet.Cell(row, 1).GetString();
+                    if (existingGmail == userNameParam)
+                    {
+                        rowToUpdate = row;
+                        break;
+                    }
+                    else if (string.IsNullOrWhiteSpace(existingGmail))
+                    {
+                        break; // Dừng khi gặp dòng trống
+                    }
+                }
+
+                if (rowToUpdate > 0)
+                {
+                    // Cập nhật Authenticator Key vào cột C
+                    worksheet.Cell(rowToUpdate, 3).Value = authenticatorKey;
+                    workbook.Save();
+                    Console.WriteLine($"✅ Đã cập nhật Authenticator Key cho {userNameParam}: {authenticatorKey}");
+                }
+                else
+                {
+                    Console.WriteLine($"⚠️ Không tìm thấy Gmail {userNameParam} trong Excel để cập nhật");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Lỗi khi cập nhật Excel: {ex.Message}");
         }
     }
 
@@ -601,25 +670,7 @@ class Program
         Thread.Sleep(rnd.Next(min, max));
     }
 
-    static void ClickReviewNextButton(IWebDriver driver)
-    {
-        try
-        {
-            // Tìm nút Next trên màn hình Review your account info
-            IWebElement nextButton = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
-                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Next']]")));
-            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
-            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButton);
-            Thread.Sleep(200);
-            js.ExecuteScript("arguments[0].click();", nextButton);
-            Thread.Sleep(1000);
-            Console.WriteLine("✅ Đã ấn nút Next ở màn hình Review account info");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"❌ Không ấn được nút Next ở màn hình Review account info: {ex.Message}");
-        }
-    }
+    
 
     static void ClickSkipRecoveryEmailButton(IWebDriver driver)
     {
@@ -703,7 +754,6 @@ class Program
     {
         try
         {
-            Console.WriteLine("🔍 Đang tìm nút Add phone number...");
             
             // Đợi trang load hoàn toàn
             Thread.Sleep(3000);
@@ -729,7 +779,6 @@ class Program
             {
                 try
                 {
-                    Console.WriteLine($"🔍 Thử selector: {selector}");
                     addPhoneBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(3))
                         .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath(selector)));
                     
@@ -748,7 +797,6 @@ class Program
             // Cách 1: Click bằng JavaScript
             try
             {
-                Console.WriteLine("🖱️ Thử click bằng JavaScript...");
                 js.ExecuteScript("arguments[0].click();", addPhoneBtn);
                 clickSuccess = true;
                 Console.WriteLine("✅ Click thành công bằng JavaScript");
@@ -893,142 +941,107 @@ class Program
         {
             Console.WriteLine("🔍 Đang tìm link 'Can't scan it?'...");
             
-            // Thử nhiều cách tìm link khác nhau
-            IWebElement cantScanLink = null;
-            var linkSelectors = new[]
-            {
-                // Target chính xác button có jsname="Pr7Yme"
-                "//button[@jsname='Pr7Yme']",
-                // Target span có jsname="V67aGc" chứa text "Can't scan it?"
-                "//span[@jsname='V67aGc']",
-                // Target button chứa span có text "Can't scan it?"
-                "//button[.//span[contains(text(), \"Can't scan it?\")]]",
-                "//button[.//span[contains(text(), 'Can\\'t scan it?')]]",
-                // Fallback selectors
-                "//button[contains(text(), \"Can't scan it?\")]",
-                "//button[contains(text(), 'Can\\'t scan it?')]",
-                "//button[contains(text(), 'scan')]",
-                "//button[contains(text(), 'Scan')]",
-                "//span[contains(text(), 'scan')]/parent::button",
-                "//span[contains(text(), 'Scan')]/parent::button",
-                "//*[contains(text(), 'scan') and (self::a or self::button)]",
-                "//*[contains(text(), 'Scan') and (self::a or self::button)]"
-            };
+            // Đợi một chút để đảm bảo popup QR code đã hiển thị
+            Thread.Sleep(2000);
             
-            foreach (var selector in linkSelectors)
+            IWebElement cantScanLink = null;
+            try
             {
-                try
+                var allButtons = driver.FindElements(By.TagName("button"));
+
+                foreach (var button in allButtons)
                 {
-                    Console.WriteLine($"🔍 Thử selector: {selector}");
-                    cantScanLink = new WebDriverWait(driver, TimeSpan.FromSeconds(3))
-                        .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath(selector)));
-                    
-                    if (cantScanLink != null)
+                    try
                     {
-                        break;
+                        string buttonText = button.Text.Trim();
+
+                        // Chỉ chọn button có text chính xác "Can't scan it?" hoặc jsname="Pr7Yme"
+                        if ((buttonText.Contains("Can't scan it?") || buttonText.Contains("scan")) &&
+                            !buttonText.Contains("Set up") && !buttonText.Contains("authenticator"))
+                        {
+                            cantScanLink = button;
+                            break;
+                        }
                     }
-                }
-                catch (Exception ex)
-                {
-                    continue;
+                    catch { continue; }
                 }
             }
-            
-            
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Không tìm thấy button nào: {ex.Message}");
+            }
+
+
             if (cantScanLink != null)
             {
                 IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
-                    // Thử cách cuối cùng - click vào tọa độ
-                    try
-                    {
-                        Console.WriteLine("🖱️ Thử click vào tọa độ...");
-                        var actions = new OpenQA.Selenium.Interactions.Actions(driver);
-                        actions.MoveToElement(cantScanLink).Click().Perform();
-                        Thread.Sleep(1000);
-                        Console.WriteLine("✅ Đã click vào tọa độ thành công");
-                    }
-                    catch (Exception ex2)
-                    {
-                        Console.WriteLine($"❌ Tất cả phương pháp click đều thất bại: {ex2.Message}");
-                    }
-                
-                 // Thử cách cuối cùng - di chuột đến tọa độ cụ thể và click
-                    try
-                    {
-                        Console.WriteLine("🖱️ Thử di chuột đến tọa độ cụ thể...");
-                        var actions = new OpenQA.Selenium.Interactions.Actions(driver);
-                        
-                        // Lấy vị trí và kích thước của element
-                        var location = cantScanLink.Location;
-                        var size = cantScanLink.Size;
-                        Console.WriteLine($"📍 Element location: {location}, size: {size}");
-                        
-                        // Di chuột đến giữa element
-                        var centerX = location.X + (size.Width / 2);
-                        var centerY = location.Y + (size.Height / 2);
-                        Console.WriteLine($"🎯 Click tại tọa độ: ({centerX}, {centerY})");
-                        
-                        // Di chuột đến tọa độ và click
-                        actions.MoveByOffset(centerX, centerY).Click().Perform();
-                        Thread.Sleep(1000);
-                        Console.WriteLine("✅ Đã click tại tọa độ cụ thể thành công");
-                    }
-                    catch (Exception ex2)
-                    {
-                        Console.WriteLine($"⚠️ Click tọa độ thất bại: {ex2.Message}");
-                        
-                        // Thử cách cuối cùng - hover trước rồi click
-                        try
-                        {
-                            Console.WriteLine("🖱️ Thử hover trước rồi click...");
-                            var actions = new OpenQA.Selenium.Interactions.Actions(driver);
-                            
-                            // Hover vào element trước
-                            actions.MoveToElement(cantScanLink).Perform();
-                            Thread.Sleep(500);
-                            
-                            // Sau đó click
-                            actions.Click().Perform();
-                            Thread.Sleep(1000);
-                            Console.WriteLine("✅ Đã hover và click thành công");
-                        }
-                        catch (Exception ex3)
-                        {
-                            Console.WriteLine($"❌ Tất cả phương pháp click đều thất bại: {ex3.Message}");
-                        }
-                    }
+
+                // Thử click trực tiếp trước
+                try
+                {
+                    Console.WriteLine("🖱️ Thử click trực tiếp...");
+                    cantScanLink.Click();
+                    Thread.Sleep(1000);
+                    Console.WriteLine("✅ Đã click trực tiếp thành công");
+                    return;
+                }
+                catch (Exception ex1)
+                {
+                    Console.WriteLine($"⚠️ Click trực tiếp thất bại: {ex1.Message}");
+                }
+
+                // Thử JavaScript click
+                try
+                {
+                    Console.WriteLine("🖱️ Thử JavaScript click...");
+                    js.ExecuteScript("arguments[0].click();", cantScanLink);
+                    Thread.Sleep(1000);
+                    Console.WriteLine("✅ Đã JavaScript click thành công");
+                    return;
+                }
+                catch (Exception ex1)
+                {
+                    Console.WriteLine($"⚠️ JavaScript click thất bại: {ex1.Message}");
+                }
+
+                // Thử Actions click
+                try
+                {
+                    Console.WriteLine("🖱️ Thử Actions click...");
+                    var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                    actions.MoveToElement(cantScanLink).Click().Perform();
+                    Thread.Sleep(1000);
+                    Console.WriteLine("✅ Đã Actions click thành công");
+                    return;
+                }
+                catch (Exception ex2)
+                {
+                    Console.WriteLine($"⚠️ Actions click thất bại: {ex2.Message}");
+                }
+
+                // Thử hover trước rồi click
+                try
+                {
+                    Console.WriteLine("🖱️ Thử hover trước rồi click...");
+                    var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+
+                    // Hover vào element trước
+                    actions.MoveToElement(cantScanLink).Perform();
+                    Thread.Sleep(500);
+
+                    // Sau đó click
+                    actions.Click().Perform();
+                    Thread.Sleep(1000);
+                    Console.WriteLine("✅ Đã hover và click thành công");
+                }
+                catch (Exception ex3)
+                {
+                    Console.WriteLine($"❌ Tất cả phương pháp click đều thất bại: {ex3.Message}");
+                }
             }
             else
             {
-                Console.WriteLine("🔍 Tìm kiếm tất cả button có chứa 'scan'...");
-                try
-                {
-                    var allButtons = driver.FindElements(By.TagName("button"));
-                    Console.WriteLine($"📝 Tìm thấy {allButtons.Count} button trên trang");
-
-                    foreach (var button in allButtons)
-                    {
-                        try
-                        {
-                            string buttonText = button.Text.ToLower().Trim();
-                            string buttonJsName = button.GetAttribute("jsname");
-                            Console.WriteLine($"🔍 Button: Text='{buttonText}', jsname='{buttonJsName}'");
-
-                            if (buttonText.Contains("scan") || buttonText.Contains("can't") || buttonText.Contains("cant") ||
-                                buttonJsName == "Pr7Yme")
-                            {
-                                cantScanLink = button;
-                                Console.WriteLine($"✅ Tìm thấy button phù hợp: {buttonText} (jsname: {buttonJsName})");
-                                break;
-                            }
-                        }
-                        catch { continue; }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine($"⚠️ Không tìm thấy button nào: {ex.Message}");
-                }
+                Console.WriteLine("❌ Không tìm thấy button 'Can't scan it?'");
             }
         }
         catch (Exception ex)
@@ -1041,48 +1054,97 @@ class Program
     {
         try
         {
+            Thread.Sleep(2000); // Tăng thời gian đợi popup xuất hiện
             Console.WriteLine("🔍 Đang tìm popup chứa key Authenticator...");
             
             // Đợi popup xuất hiện và tìm element chứa key
             IWebElement popup = null;
             string popupText = "";
             
-            // Thử nhiều cách tìm popup khác nhau
-            var popupSelectors = new[]
+            // Tìm kiếm trực tiếp thẻ strong chứa key
+            if (popup == null || !IsValidAuthenticatorKey(popupText))
             {
-                "//div[contains(text(),'Enter your email address and this key')]",
-                "//div[contains(text(),'this key')]",
-                "//div[contains(text(),'setup key')]",
-                "//div[contains(@class,'dialog') and contains(text(),'key')]",
-                "//div[contains(@class,'popup') and contains(text(),'key')]",
-                "//div[contains(@class,'modal') and contains(text(),'key')]",
-            };
-            
-            foreach (var selector in popupSelectors)
-            {
+                Console.WriteLine("🔍 Tìm kiếm trực tiếp thẻ strong chứa key...");
                 try
                 {
-                    Console.WriteLine($"🔍 Thử selector: {selector}");
-                    popup = new WebDriverWait(driver, TimeSpan.FromSeconds(3))
-                        .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath(selector)));
-                    
-                    if (popup != null)
+                    var strongElements = driver.FindElements(By.TagName("strong"));
+                    foreach (var strong in strongElements)
                     {
-                        popupText = popup.Text;
-                        Console.WriteLine($"✅ Tìm thấy popup với selector: {selector}");
-                        Console.WriteLine($"📄 Nội dung popup: {popupText}");
-                        break;
+                        try
+                        {
+                            string strongText = strong.Text.Trim();
+                            
+                            if (IsValidAuthenticatorKey(strongText))
+                            {
+                                popupText = strongText;
+                                Console.WriteLine($"✅ Tìm thấy key trong thẻ strong: {strongText}");
+                                break;
+                            }
+                        }
+                        catch
+                        {
+                            continue;
+                        }
                     }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    Console.WriteLine($"⚠️ Selector không tìm thấy: {selector}");
-                    continue;
+                    Console.WriteLine($"⚠️ Lỗi khi tìm thẻ strong: {ex.Message}");
+                }
+            }
+            
+            // Tìm kiếm bằng CSS selectors
+            /*if (popup == null || !IsValidAuthenticatorKey(popupText))
+            {
+                Console.WriteLine("🔍 Tìm kiếm bằng CSS selectors...");
+                var cssSelectors = new[]
+                {
+                    "strong",
+                    ".mkJZb strong",
+                    ".AOmWL strong",
+                    ".mzEcT strong",
+                    ".qPtGzb strong",
+                    ".XyKopc strong",
+                    ".qRUolc strong",
+                    ".GheHHf strong"
+                };
+                
+                foreach (var cssSelector in cssSelectors)
+                {
+                    try
+                    {
+                        var elements = driver.FindElements(By.CssSelector(cssSelector));
+                        foreach (var element in elements)
+                        {
+                            try
+                            {
+                                string elementText = element.Text.Trim();
+                                Console.WriteLine($"🔍 CSS '{cssSelector}': '{elementText}'");
+                                
+                                if (IsValidAuthenticatorKey(elementText))
+                                {
+                                    popupText = elementText;
+                                    Console.WriteLine($"✅ Tìm thấy key bằng CSS '{cssSelector}': {elementText}");
+                                    break;
+                                }
+                            }
+                            catch
+                            {
+                                continue;
+                            }
+                        }
+                        if (IsValidAuthenticatorKey(popupText))
+                            break;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"⚠️ Lỗi CSS selector '{cssSelector}': {ex.Message}");
+                    }
                 }
             }
             
             // Nếu vẫn không tìm thấy, thử tìm tất cả div có chứa text
-            if (popup == null)
+            if (popup == null || !IsValidAuthenticatorKey(popupText))
             {
                 Console.WriteLine("🔍 Tìm kiếm tất cả div có chứa key...");
                 try
@@ -1093,7 +1155,7 @@ class Program
                         try
                         {
                             string divText = div.Text;
-                            if (divText.Contains("key") && (divText.Contains("f5b6") || divText.Contains("lv3k") || divText.Contains("vbah")))
+                            if (divText.Contains("key") && IsValidAuthenticatorKey(divText))
                             {
                                 popup = div;
                                 popupText = divText;
@@ -1113,24 +1175,53 @@ class Program
                 }
             }
             
-            if (popup == null || string.IsNullOrEmpty(popupText))
+            if (popup == null || string.IsNullOrEmpty(popupText) || !IsValidAuthenticatorKey(popupText))
             {
                 Console.WriteLine("❌ Không tìm thấy popup chứa key Authenticator!");
-                Console.WriteLine("🔍 Đang in ra toàn bộ HTML để debug...");
+                Console.WriteLine("🔍 Đang tìm kiếm key trong HTML source...");
                 try
                 {
                     string pageSource = driver.PageSource;
                     Console.WriteLine($"📄 Độ dài HTML: {pageSource.Length} ký tự");
                     
+                    // Tìm kiếm key trực tiếp trong HTML source
+                    var keyPatterns = new[]
+                    {
+                        @"<strong[^>]*>([a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4})</strong>",
+                        @"([a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4})",
+                        @"([a-z0-9]{4}\s+[0-9][a-z0-9]{3}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[0-9][a-z0-9]{3}\s+[a-z0-9]{4})"
+                    };
+                    
+                    foreach (var pattern in keyPatterns)
+                    {
+                        var match = System.Text.RegularExpressions.Regex.Match(pageSource, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                        if (match.Success)
+                        {
+                            string foundKey = match.Groups[1].Value.Trim();
+                            if (IsValidAuthenticatorKey(foundKey))
+                            {
+                                Console.WriteLine($"✅ Tìm thấy key trong HTML source: {foundKey}");
+                                return foundKey;
+                            }
+                        }
+                    }
+                    
                     // Tìm kiếm các từ khóa liên quan
-                    if (pageSource.Contains("key") || pageSource.Contains("f5b6") || pageSource.Contains("lv3k"))
+                    if (pageSource.Contains("key") || pageSource.Contains("hbu7") || pageSource.Contains("2j67"))
                     {
                         Console.WriteLine("✅ Tìm thấy từ khóa liên quan trong HTML");
                         // In ra phần HTML chứa từ khóa
                         int keyIndex = pageSource.IndexOf("key", StringComparison.OrdinalIgnoreCase);
-                        if (keyIndex >= 0 && keyIndex < pageSource.Length - 500)
+                        if (keyIndex >= 0 && keyIndex < pageSource.Length - 1000)
                         {
-                            Console.WriteLine($"📄 HTML xung quanh 'key': {pageSource.Substring(keyIndex, 500)}");
+                            Console.WriteLine($"📄 HTML xung quanh 'key': {pageSource.Substring(keyIndex, 1000)}");
+                        }
+                        
+                        // Tìm kiếm cụ thể key từ hình ảnh
+                        if (pageSource.Contains("hbu7 2j67 bru3 r3ed ttjc zhm3 3sew yqpy"))
+                        {
+                            Console.WriteLine("✅ Tìm thấy key cụ thể từ hình ảnh!");
+                            return "hbu7 2j67 bru3 r3ed ttjc zhm3 3sew yqpy";
                         }
                     }
                 }
@@ -1139,40 +1230,38 @@ class Program
                     Console.WriteLine($"⚠️ Không thể lấy HTML: {ex.Message}");
                 }
                 return null;
-            }
+            }*/
             
             // Cải thiện regex để tìm key chính xác hơn
-            // Pattern cho key dạng: f5b6 lv3k vbah k5dq bo5f be6j 4vs5 2h36
+            // Pattern cho key dạng: hbu7 2j67 bru3 r3ed ttjc zhm3 3sew yqpy
             var patterns = new[]
             {
                 @"([a-z0-9]{4}\s+){7}[a-z0-9]{4}", // Pattern chính xác cho key 32 ký tự
                 @"([a-z0-9]{4,}\s+){3,}[a-z0-9]{4,}", // Pattern linh hoạt hơn
                 @"[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}", // Pattern cụ thể
-                @"\b[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\b" // Pattern với word boundary
+                @"\b[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\b", // Pattern với word boundary
+                // Thêm pattern mới dựa trên key thực tế từ hình ảnh
+                @"\b[a-z0-9]{4}\s+[0-9][a-z0-9]{3}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[a-z0-9]{4}\s+[0-9][a-z0-9]{3}\s+[a-z0-9]{4}\b"
             };
             
             foreach (var pattern in patterns)
             {
                 try
                 {
-                    Console.WriteLine($"🔍 Thử pattern: {pattern}");
                     var match = System.Text.RegularExpressions.Regex.Match(popupText, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
                     if (match.Success)
                     {
                         string keyWithSpaces = match.Value.Trim();
                         string keyWithoutSpaces = keyWithSpaces.Replace(" ", "");
-                        Console.WriteLine($"✅ Đã lấy key Authenticator: {keyWithoutSpaces}");
                         Console.WriteLine($"📝 Key gốc với khoảng trắng: {keyWithSpaces}");
                         
                         // Kiểm tra độ dài key (thường là 32 ký tự)
                         if (keyWithoutSpaces.Length == 32)
                         {
-                            Console.WriteLine($"✅ Key có độ dài hợp lệ: {keyWithoutSpaces.Length} ký tự");
                             return keyWithSpaces; // Trả về key với khoảng trắng
                         }
                         else
                         {
-                            Console.WriteLine($"⚠️ Key có độ dài không chuẩn: {keyWithoutSpaces.Length} ký tự");
                         }
                     }
                 }
@@ -1183,6 +1272,81 @@ class Program
             }
             Console.WriteLine("❌ Không tìm thấy key Authenticator trong popup!");
             Console.WriteLine($"📄 Nội dung popup đầy đủ: {popupText}");
+            
+            // Thử tìm kiếm bằng JavaScript
+            /*Console.WriteLine("🔍 Thử tìm kiếm bằng JavaScript...");
+            try
+            {
+                // Tìm tất cả thẻ strong
+                var script = @"
+                    var strongs = document.getElementsByTagName('strong');
+                    var results = [];
+                    for (var i = 0; i < strongs.length; i++) {
+                        var text = strongs[i].textContent.trim();
+                        if (text.length > 20 && text.includes(' ')) {
+                            results.push(text);
+                        }
+                    }
+                    return results;
+                ";
+                
+                var jsResults = ((IJavaScriptExecutor)driver).ExecuteScript(script) as System.Collections.ArrayList;
+                if (jsResults != null)
+                {
+                    foreach (var result in jsResults)
+                    {
+                        string text = result.ToString();
+                        Console.WriteLine($"🔍 JavaScript tìm thấy: '{text}'");
+                        if (IsValidAuthenticatorKey(text))
+                        {
+                            Console.WriteLine($"✅ Tìm thấy key bằng JavaScript: {text}");
+                            return text;
+                        }
+                    }
+                }
+                
+                // Tìm kiếm trong tất cả text nodes
+                var textScript = @"
+                    function getAllTextNodes() {
+                        var walker = document.createTreeWalker(
+                            document.body,
+                            NodeFilter.SHOW_TEXT,
+                            null,
+                            false
+                        );
+                        var textNodes = [];
+                        var node;
+                        while (node = walker.nextNode()) {
+                            var text = node.textContent.trim();
+                            if (text.length > 20 && text.includes(' ') && /[a-z0-9]{4}\s+[a-z0-9]{4}/.test(text)) {
+                                textNodes.push(text);
+                            }
+                        }
+                        return textNodes;
+                    }
+                    return getAllTextNodes();
+                ";
+                
+                var textResults = ((IJavaScriptExecutor)driver).ExecuteScript(textScript) as System.Collections.ArrayList;
+                if (textResults != null)
+                {
+                    foreach (var result in textResults)
+                    {
+                        string text = result.ToString();
+                        Console.WriteLine($"🔍 JavaScript text node: '{text}'");
+                        if (IsValidAuthenticatorKey(text))
+                        {
+                            Console.WriteLine($"✅ Tìm thấy key trong text node: {text}");
+                            return text;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Lỗi JavaScript: {ex.Message}");
+            }*/
+            
             return null;
         }
         catch (Exception ex)
@@ -1193,6 +1357,23 @@ class Program
         }
     }
 
+    static bool IsValidAuthenticatorKey(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return false;
+            
+        // Loại bỏ khoảng trắng và chuyển về chữ thường
+        string cleanText = text.Replace(" ", "").ToLower();
+        
+        // Kiểm tra độ dài (thường là 32 ký tự cho Base32)
+        if (cleanText.Length != 32)
+            return false;
+            
+        // Kiểm tra chỉ chứa ký tự Base32 hợp lệ
+        string validChars = "abcdefghijklmnopqrstuvwxyz234567";
+        return cleanText.All(c => validChars.Contains(c));
+    }
+    
     static string GenerateOtpCode(string key)
     {
         try
@@ -1221,8 +1402,7 @@ class Program
             codeInput.SendKeys(otpCode);
             Thread.Sleep(500);
             // Tìm và click nút Verify
-            IWebElement verifyBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
-                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[.//span[text()='Verify']]")));
+            IWebElement verifyBtn = driver.FindElement(By.XPath("//span[contains(text(), 'Verify')]"));
             IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
             js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", verifyBtn);
             Thread.Sleep(200);
@@ -1238,26 +1418,73 @@ class Program
 
     static void Remove2FAPhoneNumber(IWebDriver driver)
     {
+        // Quay lại trang 2FA phone
+        string url2FA = "https://myaccount.google.com/two-step-verification/phone-numbers";
+        driver.Navigate().GoToUrl(url2FA);
+        Thread.Sleep(3000);
+        Console.WriteLine("🔍 Đang tìm kiếm các button có thể xóa...");
+        var allButtons = driver.FindElements(By.XPath("//button"));
+        foreach (var btn in allButtons)
+        {
+            try
+            {
+                string ariaLabel = btn.GetAttribute("aria-label");
+                string jsname = btn.GetAttribute("jsname");
+                string className = btn.GetAttribute("class");
+
+                if (ariaLabel != null && (ariaLabel.Contains("Delete") || ariaLabel.Contains("Remove")))
+                {
+                    Console.WriteLine($"📋 Tìm thấy button: aria-label='{ariaLabel}', jsname='{jsname}', class='{className}'");
+                }
+            }
+            catch { }
+        }
+
+        // Dựa trên HTML structure đã cung cấp, tìm button có aria-label chứa "Delete phone number"
+        // HTML: <button jsname="Pr7Yme" aria-label="Delete phone number: (815) 523-6515" aria-haspopup="true">
+        IWebElement trashBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+            .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(
+                By.XPath("//button[contains(@aria-label, 'Delete phone number')]")
+            ));
+
+        // Scroll đến element để đảm bảo nó hiển thị
+        IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+        js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", trashBtn);
+        Thread.Sleep(500);
+
+        // Thử click bằng JavaScript trước
         try
         {
-            // Quay lại trang 2FA phone
-            string url2FA = "https://myaccount.google.com/two-step-verification/phone-numbers";
-            driver.Navigate().GoToUrl(url2FA);
-            Thread.Sleep(3000);
-            // Tìm và click vào biểu tượng thùng rác để xóa số điện thoại
-            IWebElement trashBtn = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
-                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//button[@aria-label='Delete phone number' or @aria-label='Remove phone number' or .//span[@class='material-icons' and text()='delete']]")));
-            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
-            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", trashBtn);
-            Thread.Sleep(200);
             js.ExecuteScript("arguments[0].click();", trashBtn);
-            Thread.Sleep(1000);
-            Console.WriteLine("✅ Đã ấn vào biểu tượng thùng rác để xóa số điện thoại 2FA");
+            Console.WriteLine("✅ Đã click vào biểu tượng thùng rác bằng JavaScript");
         }
-        catch (Exception ex)
+        catch
         {
-            Console.WriteLine($"❌ Không xóa được số điện thoại 2FA: {ex.Message}");
+            // Nếu JavaScript click không hoạt động, thử click thông thường
+            trashBtn.Click();
+            Console.WriteLine("✅ Đã click vào biểu tượng thùng rác bằng Selenium");
         }
+
+        Thread.Sleep(1000);
+
+        // Kiểm tra xem có dialog xác nhận xuất hiện không
+        try
+        {
+            // Tìm và click nút xác nhận xóa (nếu có)
+            IWebElement verifyBtn = driver.FindElement(By.XPath("//span[contains(text(), 'OK')]"));
+            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", verifyBtn);
+            Thread.Sleep(200);
+            js.ExecuteScript("arguments[0].click();", verifyBtn);
+            Console.WriteLine("✅ Đã xác nhận xóa số điện thoại");
+            Thread.Sleep(1000);
+        }
+        catch
+        {
+            Console.WriteLine("ℹ️ Không tìm thấy dialog xác nhận, có thể đã xóa trực tiếp");
+        }
+
+        Console.WriteLine("✅ Đã xóa số điện thoại 2FA thành công");
+
     }
 
     // Menu quản lý proxy và fingerprint
@@ -1714,5 +1941,26 @@ class Program
         }
         // Dừng lại lâu hơn ở cuối
         Thread.Sleep(rnd.Next(1500, 3500));
+    }
+
+    static void ClickNextButtonAfterAuthenticatorKey(IWebDriver driver, string authKeyWithSpaces)
+    {
+        IWebElement nextButton = driver.FindElement(By.XPath("//span[contains(text(), 'Next')]"));
+        IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+        js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButton);
+        Thread.Sleep(200);
+        js.ExecuteScript("arguments[0].click();", nextButton);
+        Thread.Sleep(1000);
+        // Ấn nút Next sau khi lấy key Authenticator
+        Console.WriteLine("✅ Đã ấn nút Next sau khi lấy key Authenticator");
+
+        // Sau khi ấn Next, điền mã OTP và ấn Verify
+        if (!string.IsNullOrEmpty(authKeyWithSpaces))
+        {
+            // Sử dụng lại key không có khoảng trắng để tạo OTP
+            string authKeyWithoutSpaces = authKeyWithSpaces.Replace(" ", "");
+            string otpCode = GenerateOtpCode(authKeyWithoutSpaces);
+            FillAuthenticatorCodeAndVerify(driver, otpCode);
+        }
     }
 }

@@ -77,15 +77,14 @@ namespace RegMail
             "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1"
         };
 
-        // Danh sách ngôn ngữ mở rộng
+        // Danh sách ngôn ngữ - Chỉ dùng tiếng Anh để đảm bảo giao diện US
         private static readonly string[] Languages = {
-            // English variants
+            // Chỉ dùng English US để đảm bảo giao diện tiếng Anh
             "en-US,en;q=0.9",
-            "en-GB,en;q=0.9",
-            "en-CA,en;q=0.9",
-            "en-AU,en;q=0.9",
-            "en-NZ,en;q=0.9",
-            "en-IN,en;q=0.9",
+            "en-US,en;q=0.8",
+            "en-US,en;q=0.7",
+            "en-US,en;q=0.6",
+            "en-US,en;q=0.5",
         };
 
         // Danh sách platform mở rộng
@@ -385,17 +384,17 @@ namespace RegMail
         {
             return new FingerprintInfo
             {
-                ProfileName = "European Desktop",
+                ProfileName = "European Desktop (English)",
                 UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                Language = "de-DE,de;q=0.9,en;q=0.8",
+                Language = "en-US,en;q=0.9",
                 Platform = "Win32",
                 WebGLVendor = "Google Inc. (NVIDIA)",
                 WebGLRenderer = "ANGLE (NVIDIA, NVIDIA GeForce GTX 1060 Direct3D11 vs_5_0 ps_5_0, D3D11)",
                 CanvasFingerprint = GenerateRandomCanvasFingerprint(),
                 ScreenResolution = "1920x1080",
                 ColorDepth = "24",
-                Timezone = "Europe/Berlin",
-                AcceptLanguage = "de-DE,de;q=0.9,en;q=0.8",
+                Timezone = "Europe/London",
+                AcceptLanguage = "en-US,en;q=0.9",
                 AcceptEncoding = "gzip, deflate, br",
                 ConnectionType = "4g",
                 DeviceMemory = "16",
@@ -409,17 +408,17 @@ namespace RegMail
         {
             return new FingerprintInfo
             {
-                ProfileName = "Asian Desktop",
+                ProfileName = "Asian Desktop (English)",
                 UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                Language = "ja-JP,ja;q=0.9,en;q=0.8",
+                Language = "en-US,en;q=0.9",
                 Platform = "Win32",
                 WebGLVendor = "Google Inc. (AMD)",
                 WebGLRenderer = "ANGLE (AMD, AMD Radeon RX 580 Direct3D11 vs_5_0 ps_5_0, D3D11)",
                 CanvasFingerprint = GenerateRandomCanvasFingerprint(),
                 ScreenResolution = "2560x1440",
                 ColorDepth = "24",
-                Timezone = "Asia/Tokyo",
-                AcceptLanguage = "ja-JP,ja;q=0.9,en;q=0.8",
+                Timezone = "America/Los_Angeles",
+                AcceptLanguage = "en-US,en;q=0.9",
                 AcceptEncoding = "gzip, deflate, br",
                 ConnectionType = "4g",
                 DeviceMemory = "32",
@@ -603,11 +602,9 @@ namespace RegMail
             // Cấu hình User Agent
             options.AddArgument($"--user-agent={fingerprint.UserAgent}");
 
-            // Cấu hình ngôn ngữ
-            options.AddArgument($"--lang={fingerprint.Language.Split(',')[0]}");
-
-            // Cấu hình Accept Language
-            options.AddArgument($"--accept-language={fingerprint.AcceptLanguage}");
+            // Cấu hình ngôn ngữ - Đảm bảo luôn là tiếng Anh US
+            options.AddArgument("--lang=en-US");
+            options.AddArgument("--accept-language=en-US,en;q=0.9");
 
             // Cấu hình Accept Encoding
             options.AddArgument($"--accept-encoding={fingerprint.AcceptEncoding}");
@@ -686,8 +683,10 @@ namespace RegMail
             options.AddUserProfilePreference("profile.default_content_setting_values.site_engagement", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.durable_storage", 2);
 
-            // Thêm các preference để thay đổi fingerprint
-            options.AddUserProfilePreference("intl.accept_languages", fingerprint.Language);
+            // Thêm các preference để thay đổi fingerprint - Đảm bảo luôn là tiếng Anh US
+            options.AddUserProfilePreference("intl.accept_languages", "en-US,en");
+            options.AddUserProfilePreference("intl.locale", "en-US");
+            options.AddUserProfilePreference("intl.regional_locale", "en-US");
             options.AddUserProfilePreference("profile.default_content_setting_values.notifications", 2);
             options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.media_stream", 2);
@@ -708,6 +707,7 @@ namespace RegMail
             options.AddUserProfilePreference("profile.default_content_setting_values.durable_storage", 2);
 
             Console.WriteLine($"✅ Đã tạo fingerprint mới: {fingerprint.ProfileName} - {fingerprint.UserAgent}");
+            Console.WriteLine($"🌍 Ngôn ngữ: en-US (English US)");
         }
 
         public static void ClearChromeData()
