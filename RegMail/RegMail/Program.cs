@@ -1,22 +1,23 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Diagnostics;
-using System.Text;
+﻿using ClosedXML.Excel;
+using DocumentFormat.OpenXml.Wordprocessing;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
-using OpenQA.Selenium.Support.UI;
 using OpenQA.Selenium.Interactions;
-using System.Threading;
-using System.Net.Http;
-using System.Text.Json;
-using System.Threading.Tasks;
-using System.Text.RegularExpressions;
-using ClosedXML.Excel;
-using System.IO;
-using System.Linq;
-using SeleniumExtras.WaitHelpers;
+using OpenQA.Selenium.Support.UI;
 using OtpNet;
 using RegMail;
+using SeleniumExtras.WaitHelpers;
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
 
 public class OtpResponse
 {
@@ -432,14 +433,16 @@ class Program
         string url = "https://dailyotp.com/api/rent-number?appBrand=Google / Gmail / Youtube&countryCode=US&serverName=Server 1&api_key=4cdba4a83cb5e06bf4f81bb491f7a434vUo9b9CciGZ1VPPjbDcj";
 
         HttpResponseMessage response = await client.GetAsync(url);
+        string body = await response.Content.ReadAsStringAsync();
         if (response.IsSuccessStatusCode)
         {
+            Console.WriteLine("✅ API OK: " + body);
+
             string jsonResponse = await response.Content.ReadAsStringAsync();
             var result = JsonSerializer.Deserialize<OtpResponse>(jsonResponse);
 
             phoneNumber2FA = result.data.phoneNumber;
             Console.WriteLine($"Số thuê: {result.data.phoneNumber}");
-            Console.WriteLine($"Số đã thuê: {phoneNumber2FA}");
             Console.WriteLine($"transId: {result.data.transId}");
             if(phoneNumber2FA == null || phoneNumber2FA == "")
             {
@@ -465,7 +468,8 @@ class Program
         }
         else
         {
-            Console.WriteLine("❌ Lỗi khi gọi API.");
+            Console.WriteLine("❌ Lỗi gọi API: " + response.StatusCode);
+            Console.WriteLine("📦 Nội dung: " + body);
             return "";
         }
     }
