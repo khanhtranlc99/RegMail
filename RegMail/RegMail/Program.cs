@@ -129,6 +129,20 @@ class Program
             ClickNextButton(driver);
 
             await HandleRequestSever(driver, email, password);
+            
+            // Kiểm tra xem tab có bị đóng không (do không nhận được OTP)
+            try
+            {
+                // Thử truy cập một thuộc tính của driver để kiểm tra xem nó còn hoạt động không
+                string currentUrl = driver.Url;
+            }
+            catch (Exception)
+            {
+                // Tab đã bị đóng, chuyển sang tab tiếp theo
+                Console.WriteLine("🔄 Tab đã bị đóng do không nhận được OTP, chuyển sang tab tiếp theo...");
+                continue;
+            }
+            
             Console.WriteLine($"✅ Tài khoản Gmail: {email}, Password: {password}");
 
             ClickSkipRecoveryEmailButton(driver);
@@ -202,12 +216,29 @@ class Program
         while (!success && x < 100)
         {
             username = firstName.ToLower() + "90" + lastName.ToLower() + x;
-            // Tìm ô nhập cho 'Create a Gmail address'
-            IWebElement usernameField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
-                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Create a Gmail address']")));
-            usernameField.Clear();
-            // Nhập từng ký tự một
-            HumanType(usernameField, username);
+            
+            try
+            {
+                IWebElement createGmailField = new WebDriverWait(driver, TimeSpan.FromSeconds(5))
+                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Create a Gmail address']")));
+                
+                createGmailField.Click();
+                Thread.Sleep(1000);
+                
+                // Sau đó tìm ô Username để điền
+                IWebElement usernameField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Username']")));
+                usernameField.Clear();
+                HumanType(usernameField, username);
+            }
+            catch (WebDriverTimeoutException)
+            {
+                // Nếu không tìm thấy ô "Create a Gmail address", điền trực tiếp vào ô Username
+                IWebElement usernameField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Username']")));
+                usernameField.Clear();
+                HumanType(usernameField, username);
+            }
 
             ClickNextButton(driver);
             Thread.Sleep(2000);
@@ -534,7 +565,19 @@ class Program
 
         if (retry >= maxRetry)
         {
-            Console.WriteLine("⚠️ Quá thời gian chờ mã OTP.");
+            Console.WriteLine("⚠️ Quá thời gian chờ mã OTP. Đóng tab và chuyển sang tab mới...");
+            try
+            {
+                driver.Quit();
+                driver.Dispose();
+                Console.WriteLine("✅ Đã đóng tab thành công");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Lỗi khi đóng tab: {ex.Message}");
+            }
+            // Thoát khỏi hàm để không tiếp tục xử lý
+            return;
         }
     }
 
