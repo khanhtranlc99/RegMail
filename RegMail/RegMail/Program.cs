@@ -219,17 +219,16 @@ class Program
             
             try
             {
-                IWebElement createGmailField = new WebDriverWait(driver, TimeSpan.FromSeconds(5))
-                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Create a Gmail address']")));
-                
-                createGmailField.Click();
-                Thread.Sleep(1000);
-                
-                // Sau đó tìm ô Username để điền
+                username = firstName.ToLower() + "90" + lastName.ToLower() + x;
+                // Tìm ô nhập cho 'Create a Gmail address'
                 IWebElement usernameField = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
-                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Username']")));
+                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@aria-label='Create a Gmail address']")));
                 usernameField.Clear();
+                // Nhập từng ký tự một
                 HumanType(usernameField, username);
+
+                ClickNextButton(driver);
+                Thread.Sleep(2000);
             }
             catch (WebDriverTimeoutException)
             {
