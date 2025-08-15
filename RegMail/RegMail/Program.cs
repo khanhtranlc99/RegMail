@@ -42,6 +42,9 @@ class Program
     private static string currentAuthenticatorKey; // Lưu key cho Gmail hiện tại
     private static string currentGmail; // Lưu Gmail hiện tại
     private static string currentPassword; // Lưu password hiện tại
+    private static Random _random = new Random(); // Random cho các hành động mô phỏng
+    private static bool enableGmailSync = false; // Cờ để bật/tắt đồng bộ Gmail
+    
     static async Task Main()
     {
         Console.OutputEncoding = Encoding.UTF8;
@@ -53,7 +56,20 @@ class Program
         // Hiển thị menu chọn chế độ proxy
         await ShowProxyMenu();
 
-        Console.Write("Nhập số lượng tab Chrome cần mở: ");
+        // Hỏi người dùng có muốn đồng bộ Gmail không
+        Console.Write("Bạn có muốn đăng nhập và đồng bộ Gmail sau khi tạo? (y/n): ");
+        enableGmailSync = Console.ReadLine()?.ToLower().StartsWith("y") == true;
+        
+        if (enableGmailSync)
+        {
+            Console.WriteLine("✅ Sẽ tự động đăng nhập và đồng bộ Gmail sau khi tạo thành công");
+        }
+        else
+        {
+            Console.WriteLine("⚠️ Chỉ tạo tài khoản Gmail mà không đăng nhập đồng bộ");
+        }
+
+        Console.Write("\nNhập số lượng tab Chrome cần mở: ");
         if (!int.TryParse(Console.ReadLine(), out int tabCount) || tabCount <= 0)
         {
             Console.WriteLine("Số lượng tab không hợp lệ!");
@@ -81,6 +97,35 @@ class Program
             options.AddArgument("--new-window");
             options.AddArgument("--window-size=" + width + "," + height);
             options.AddArgument("--window-position=" + posX + "," + posY);
+            
+            // Thêm các tùy chọn để tránh verification (MỚI)
+            options.AddArgument("--disable-blink-features=AutomationControlled");
+            options.AddArgument("--disable-features=VizDisplayCompositor");
+            options.AddArgument("--disable-ipc-flooding-protection");
+            options.AddArgument("--disable-background-timer-throttling");
+            options.AddArgument("--disable-backgrounding-occluded-windows");
+            options.AddArgument("--disable-renderer-backgrounding");
+            options.AddArgument("--disable-field-trial-config");
+            options.AddArgument("--disable-back-forward-cache");
+            options.AddArgument("--enable-features=NetworkService,NetworkServiceInProcess");
+            options.AddArgument("--disable-component-extensions-with-background-pages");
+            options.AddArgument("--disable-default-apps");
+            options.AddArgument("--disable-extensions");
+            options.AddArgument("--force-color-profile=srgb");
+            options.AddArgument("--metrics-recording-only");
+            options.AddArgument("--no-first-run");
+            options.AddArgument("--password-store=basic");
+            options.AddArgument("--use-mock-keychain");
+            options.AddArgument("--disable-component-update");
+            options.AddArgument("--disable-domain-reliability");
+            options.AddArgument("--disable-sync");
+            
+            // Ẩn các dấu hiệu automation
+            options.AddExcludedArgument("enable-automation");
+            options.AddAdditionalOption("useAutomationExtension", false);
+            
+            // Thêm user agent để tự nhiên hơn
+            options.AddArgument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36");
             // Tạo fingerprint từ danh sách profile có sẵn cho mỗi tab
             var fingerprint = FingerprintManager.GetRandomProfile();
             FingerprintManager.ConfigureChromeOptions(options, fingerprint);
@@ -161,6 +206,193 @@ class Program
             ClickNextButtonAfterAuthenticatorKey(driver, authKeyWithSpaces);
             Thread.Sleep(3000);
             Remove2FAPhoneNumber(driver);
+            
+            // Đăng nhập và đồng bộ hóa Gmail sau khi tạo thành công (nếu được bật)
+            if (enableGmailSync)
+            {
+                Thread.Sleep(2000);
+                LoginAndSyncGmail(driver, currentGmail, currentPassword);
+            }
+            else
+            {
+                Console.WriteLine("⚠️ Bỏ qua đăng nhập đồng bộ Gmail theo yêu cầu của người dùng");
+            }
+        }
+    }
+
+    // Hàm đăng nhập và đồng bộ hóa Gmail sau khi tạo thành công
+    static void LoginAndSyncGmail(IWebDriver driver, string email, string password)
+    {
+        try
+        {
+            Console.WriteLine($"🔐 Bắt đầu đăng nhập và đồng bộ hóa Gmail: {email}");
+            
+            // Chuyển đến trang Gmail
+            driver.Navigate().GoToUrl("https://mail.google.com");
+            Thread.Sleep(3000);
+            
+            // Kiểm tra xem đã đăng nhập hay chưa
+            try
+            {
+                // Tìm compose button để xác nhận đã đăng nhập
+                var composeButton = driver.FindElement(By.XPath("//div[contains(text(), 'Compose')]"));
+                Console.WriteLine("✅ Gmail đã được đăng nhập và đồng bộ thành công!");
+                
+                // Kích hoạt các dịch vụ Google khác để đồng bộ hoàn toàn
+                ActivateGoogleServices(driver);
+                return;
+            }
+            catch (NoSuchElementException)
+            {
+                // Chưa đăng nhập, tiếp tục quá trình đăng nhập
+                Console.WriteLine("🔄 Đang thực hiện đăng nhập...");
+            }
+            
+            // Nếu cần đăng nhập, điền email
+            try
+            {
+                IWebElement emailInput = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@type='email']")));
+                emailInput.Clear();
+                HumanType(emailInput, email);
+                ClickNextButton(driver);
+                Thread.Sleep(2000);
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("⚠️ Không tìm thấy ô nhập email hoặc đã đăng nhập rồi");
+            }
+            
+            // Điền password
+            try
+            {
+                IWebElement passwordInput = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementIsVisible(By.XPath("//input[@type='password']")));
+                passwordInput.Clear();
+                HumanType(passwordInput, password);
+                ClickNextButton(driver);
+                Thread.Sleep(3000);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Lỗi khi nhập password: {ex.Message}");
+            }
+            
+            // Xử lý 2FA nếu cần
+            Handle2FALogin(driver);
+            
+            // Kích hoạt đồng bộ với các dịch vụ Google
+            ActivateGoogleServices(driver);
+            
+            Console.WriteLine("✅ Gmail đã được đăng nhập và đồng bộ hoàn toàn!");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Lỗi khi đăng nhập Gmail: {ex.Message}");
+        }
+    }
+    
+    // Hàm xử lý 2FA khi đăng nhập
+    static void Handle2FALogin(IWebDriver driver)
+    {
+        try
+        {
+            // Kiểm tra xem có yêu cầu 2FA không
+            var authenticatorInput = driver.FindElements(By.XPath("//input[@type='tel' or @aria-label='Enter code']"));
+            if (authenticatorInput.Count > 0)
+            {
+                Console.WriteLine("🔐 Phát hiện yêu cầu 2FA, đang tạo mã OTP...");
+                
+                if (!string.IsNullOrEmpty(currentAuthenticatorKey))
+                {
+                    string authKeyWithoutSpaces = currentAuthenticatorKey.Replace(" ", "");
+                    string otpCode = GenerateOtpCode(authKeyWithoutSpaces);
+                    
+                    if (!string.IsNullOrEmpty(otpCode))
+                    {
+                        authenticatorInput[0].Clear();
+                        HumanType(authenticatorInput[0], otpCode);
+                        ClickNextButton(driver);
+                        Thread.Sleep(3000);
+                        Console.WriteLine("✅ Đã nhập mã 2FA thành công");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi xử lý 2FA: {ex.Message}");
+        }
+    }
+    
+    // Hàm kích hoạt và đồng bộ các dịch vụ Google
+    static void ActivateGoogleServices(IWebDriver driver)
+    {
+        try
+        {
+            Console.WriteLine("🔄 Đang kích hoạt đồng bộ hóa với các dịch vụ Google...");
+            
+            // Kích hoạt Google Drive
+            driver.Navigate().GoToUrl("https://drive.google.com");
+            Thread.Sleep(2000);
+            Console.WriteLine("✅ Đã kích hoạt Google Drive");
+            
+            // Kích hoạt Google Photos
+            driver.Navigate().GoToUrl("https://photos.google.com");
+            Thread.Sleep(2000);
+            Console.WriteLine("✅ Đã kích hoạt Google Photos");
+            
+            // Kích hoạt YouTube
+            driver.Navigate().GoToUrl("https://youtube.com");
+            Thread.Sleep(2000);
+            Console.WriteLine("✅ Đã kích hoạt YouTube");
+            
+            // Quay lại Gmail để đảm bảo hoạt động bình thường
+            driver.Navigate().GoToUrl("https://mail.google.com");
+            Thread.Sleep(2000);
+            
+            // Bật sync trong Chrome (nếu có thể)
+            EnableChromeSync(driver);
+            
+            Console.WriteLine("🎉 Đã hoàn thành việc đồng bộ hóa tất cả dịch vụ Google!");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi kích hoạt dịch vụ Google: {ex.Message}");
+        }
+    }
+    
+    // Hàm bật Chrome Sync (nếu có thể)
+    static void EnableChromeSync(IWebDriver driver)
+    {
+        try
+        {
+            Console.WriteLine("🔄 Đang cố gắng bật Chrome Sync...");
+            
+            // Truy cập trang settings Chrome
+            driver.Navigate().GoToUrl("chrome://settings/syncSetup");
+            Thread.Sleep(3000);
+            
+            // Tìm và click nút "Turn on sync" hoặc "Yes, I'm in"
+            try
+            {
+                var syncButtons = driver.FindElements(By.XPath("//button[contains(text(), 'Turn on') or contains(text(), 'Yes') or contains(text(), 'Enable')]"));
+                if (syncButtons.Count > 0)
+                {
+                    IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+                    js.ExecuteScript("arguments[0].click();", syncButtons[0]);
+                    Thread.Sleep(2000);
+                    Console.WriteLine("✅ Đã bật Chrome Sync thành công!");
+                }
+            }
+            catch (Exception)
+            {
+                Console.WriteLine("⚠️ Không thể tự động bật Chrome Sync, có thể đã được bật sẵn");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Không thể truy cập Chrome Sync: {ex.Message}");
         }
     }
 
@@ -758,7 +990,7 @@ class Program
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Không ấn được nút I agree: {ex.Message}");
-        }
+        } 
     }
 
     static void ClickConfirmPersonalizationButton(IWebDriver driver)
@@ -1545,7 +1777,9 @@ class Program
             Console.WriteLine("4. Tải lại danh sách proxy từ file");
             Console.WriteLine("5. Xóa dữ liệu Chrome (xóa fingerprint cũ)");
             Console.WriteLine("6. Tạo fingerprint mới và test");
-            Console.WriteLine("7. Bắt đầu tạo tài khoản Gmail");
+            Console.WriteLine("7. Xóa tất cả Chrome profiles đã lưu");
+            Console.WriteLine("8. Hiển thị danh sách Chrome profiles");
+            Console.WriteLine("9. Bắt đầu tạo tài khoản Gmail");
             Console.WriteLine("0. Thoát");
             Console.Write("Chọn tùy chọn: ");
 
@@ -1573,6 +1807,12 @@ class Program
                     TestNewFingerprint();
                     break;
                 case "7":
+                    ClearAllChromeProfiles();
+                    break;
+                case "8":
+                    ShowChromeProfiles();
+                    break;
+                case "9":
                     return; // Thoát menu và tiếp tục chương trình
                 case "0":
                     Environment.Exit(0);
@@ -1772,122 +2012,311 @@ class Program
         }
     }
 
+    // Hàm xóa tất cả Chrome profiles đã lưu
+    static void ClearAllChromeProfiles()
+    {
+        try
+        {
+            Console.WriteLine("🗑️ Bắt đầu xóa tất cả Chrome profiles đã lưu...");
+            
+            string userDataPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), 
+                "Google", "Chrome", "User Data");
+            
+            if (!Directory.Exists(userDataPath))
+            {
+                Console.WriteLine("📁 Không tìm thấy thư mục Chrome User Data");
+                return;
+            }
+            
+            var regMailProfiles = Directory.GetDirectories(userDataPath)
+                .Where(dir => Path.GetFileName(dir).StartsWith("RegMail_Profile_"))
+                .ToArray();
+            
+            if (regMailProfiles.Length == 0)
+            {
+                Console.WriteLine("📝 Không có profile RegMail nào để xóa");
+                return;
+            }
+            
+            Console.WriteLine($"🔍 Tìm thấy {regMailProfiles.Length} profile RegMail:");
+            foreach (var profile in regMailProfiles)
+            {
+                Console.WriteLine($"   - {Path.GetFileName(profile)}");
+            }
+            
+            Console.Write("\nBạn có chắc chắn muốn xóa tất cả? (y/n): ");
+            if (Console.ReadLine()?.ToLower().StartsWith("y") == true)
+            {
+                int deletedCount = 0;
+                foreach (var profile in regMailProfiles)
+                {
+                    try
+                    {
+                        Directory.Delete(profile, true);
+                        deletedCount++;
+                        Console.WriteLine($"✅ Đã xóa: {Path.GetFileName(profile)}");
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"❌ Không thể xóa {Path.GetFileName(profile)}: {ex.Message}");
+                    }
+                }
+                Console.WriteLine($"🎉 Đã xóa thành công {deletedCount}/{regMailProfiles.Length} profile!");
+            }
+            else
+            {
+                Console.WriteLine("❌ Đã hủy xóa profiles");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Lỗi khi xóa Chrome profiles: {ex.Message}");
+        }
+    }
+    
+    // Hàm hiển thị danh sách Chrome profiles
+    static void ShowChromeProfiles()
+    {
+        try
+        {
+            Console.WriteLine("📋 Danh sách Chrome profiles đã lưu:");
+            
+            string userDataPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), 
+                "Google", "Chrome", "User Data");
+            
+            if (!Directory.Exists(userDataPath))
+            {
+                Console.WriteLine("📁 Không tìm thấy thư mục Chrome User Data");
+                return;
+            }
+            
+            var regMailProfiles = Directory.GetDirectories(userDataPath)
+                .Where(dir => Path.GetFileName(dir).StartsWith("RegMail_Profile_"))
+                .OrderBy(dir => Path.GetFileName(dir))
+                .ToArray();
+            
+            if (regMailProfiles.Length == 0)
+            {
+                Console.WriteLine("📝 Không có profile RegMail nào được lưu");
+                return;
+            }
+            
+            Console.WriteLine($"\n🔍 Tìm thấy {regMailProfiles.Length} profile RegMail:");
+            for (int i = 0; i < regMailProfiles.Length; i++)
+            {
+                var profile = regMailProfiles[i];
+                var profileName = Path.GetFileName(profile);
+                var createdTime = Directory.GetCreationTime(profile);
+                var sizeInfo = GetDirectorySize(profile);
+                
+                Console.WriteLine($"   {i + 1}. {profileName}");
+                Console.WriteLine($"      📅 Tạo: {createdTime:dd/MM/yyyy HH:mm}");
+                Console.WriteLine($"      💾 Kích thước: {sizeInfo}");
+                Console.WriteLine();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Lỗi khi hiển thị Chrome profiles: {ex.Message}");
+        }
+    }
+    
+    // Hàm tính kích thước thư mục
+    static string GetDirectorySize(string dirPath)
+    {
+        try
+        {
+            long totalSize = Directory.GetFiles(dirPath, "*", SearchOption.AllDirectories)
+                .Sum(file => new FileInfo(file).Length);
+            
+            if (totalSize < 1024)
+                return $"{totalSize} bytes";
+            else if (totalSize < 1024 * 1024)
+                return $"{totalSize / 1024:F1} KB";
+            else if (totalSize < 1024 * 1024 * 1024)
+                return $"{totalSize / (1024 * 1024):F1} MB";
+            else
+                return $"{totalSize / (1024 * 1024 * 1024):F1} GB";
+        }
+        catch
+        {
+            return "Không xác định";
+        }
+    }
+
     static void InjectAntiDetectionScripts(IWebDriver driver)
     {
         try
         {
             IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
             
-            // 1. Ẩn webdriver property
+            // 1. Ẩn webdriver property (QUAN TRỌNG NHẤT)
             js.ExecuteScript(@"
                 Object.defineProperty(navigator, 'webdriver', {
                     get: () => undefined,
                 });
+                delete navigator.__defineGetter__;
+                delete navigator.__defineSetter__;
+                delete navigator.__lookupGetter__;
+                delete navigator.__lookupSetter__;
             ");
 
-            // 2. Thay đổi user agent
+            // 2. Ẩn tất cả automation properties (CỰC QUAN TRỌNG)
             js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'userAgent', {
-                    get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                });
-            ");
-
-            // 3. Thay đổi platform
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'platform', {
-                    get: () => 'Win32',
-                });
-            ");
-
-            // 4. Thay đổi language
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'language', {
-                    get: () => 'en-US',
-                });
-            ");
-
-            // 5. Thay đổi languages array
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en'],
-                });
-            ");
-
-            // 6. Ẩn automation properties
-            js.ExecuteScript(@"
+                // Chrome automation detector
                 delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
                 delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
                 delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
-            ");
-
-            // 7. Thay đổi permissions
-            js.ExecuteScript(@"
-                const originalQuery = window.navigator.permissions.query;
-                window.navigator.permissions.query = (parameters) => (
-                    parameters.name === 'notifications' ?
-                        Promise.resolve({ state: Notification.permission }) :
-                        originalQuery(parameters)
-                );
-            ");
-
-            // 8. Thay đổi plugins
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5],
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_JSON;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Object;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Proxy;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Reflect;
+                
+                // Additional Chrome automation flags
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_AsyncFunction;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise_resolve;
+                delete window.cdc_adoQpoasnfa76pfcZLmcfl_String;
+                
+                // Remove automation indicators
+                ['$chrome_asyncScriptInfo', '$cdc_asdjflasutopfhvcZLmcfl_'].forEach(prop => {
+                    delete window[prop];
                 });
             ");
 
-            // 9. Thay đổi mimeTypes
+            // 3. Tạo chrome object tự nhiên và hoàn chỉnh hơn
             js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'mimeTypes', {
-                    get: () => [1, 2, 3, 4, 5],
+                if (!window.chrome) {
+                    window.chrome = {
+                        runtime: {
+                            onConnect: null,
+                            onMessage: null,
+                            connect: function() { return {}; },
+                            sendMessage: function() {},
+                            onInstalled: { addListener: function() {} }
+                        },
+                        storage: {
+                            local: {
+                                get: function() { return Promise.resolve({}); },
+                                set: function() { return Promise.resolve(); }
+                            }
+                        }
+                    };
+                }
+            ");
+
+            // 4. Ẩn tất cả dấu hiệu selenium/automation/testing tools
+            js.ExecuteScript(@"
+                var toDelete = [
+                    'callSelenium', '_Selenium_IDE_Recorder', 'callPhantom', '__phantomas',
+                    '__selenium_unwrapped', '__webdriver_evaluate', '__driver_evaluate',
+                    '__webdriver_script_function', '__webdriver_script_func', '__webdriver_script_fn',
+                    '__fxdriver_evaluate', '__driver_unwrapped', '__webdriver_unwrapped',
+                    '__selenium_evaluate', '__fxdriver_unwrapped', '_selenium', 'calledSelenium',
+                    '_$webdriver_asynchronousExecute', '__webDriverCssSelector', '__$webdriverAsyncExecutor',
+                    'webdriver', '_phantom', '__nightmare', '_selenium_ide_recorder',
+                    'domAutomation', 'domAutomationController', '__webdriver_script_function'
+                ];
+                
+                toDelete.forEach(prop => {
+                    try {
+                        delete window[prop];
+                        delete document[prop];
+                        delete navigator[prop];
+                    } catch(e) {}
                 });
             ");
 
-            // 10. Thay đổi hardwareConcurrency
+            // 5. Làm giả plugins và mimeTypes tự nhiên hơn
             js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'hardwareConcurrency', {
-                    get: () => 8,
-                });
+                try {
+                    const mockPlugins = [
+                        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: 'Portable Document Format' },
+                        { name: 'Native Client', filename: 'internal-nacl-plugin', description: 'Native Client' }
+                    ];
+                    
+                    Object.defineProperty(navigator, 'plugins', {
+                        get: function() { return mockPlugins; }
+                    });
+                    
+                    Object.defineProperty(navigator, 'mimeTypes', {
+                        get: function() { 
+                            return [
+                                { type: 'application/pdf', suffixes: 'pdf', description: 'Portable Document Format' }
+                            ]; 
+                        }
+                    });
+                } catch(e) {}
             ");
 
-            // 11. Thay đổi deviceMemory
+            // 6. Cải thiện permissions API để tự nhiên hơn
             js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'deviceMemory', {
-                    get: () => 8,
-                });
+                try {
+                    const originalQuery = window.navigator.permissions.query;
+                    window.navigator.permissions.query = function(parameters) {
+                        const permissions = {
+                            'notifications': 'denied',
+                            'geolocation': 'prompt', 
+                            'camera': 'prompt',
+                            'microphone': 'prompt'
+                        };
+                        const state = permissions[parameters.name] || 'denied';
+                        return Promise.resolve({ state: state });
+                    };
+                } catch(e) {}
             ");
 
-            // 12. Thay đổi connection
+            // 7. Làm giả các thuộc tính thiết bị tự nhiên hơn (MỚI)
             js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'connection', {
-                    get: () => ({
-                        effectiveType: '4g',
-                        rtt: 50,
-                        downlink: 10,
-                        saveData: false
-                    }),
-                });
+                try {
+                    // Giả mạo battery API
+                    Object.defineProperty(navigator, 'getBattery', {
+                        get: function() {
+                            return function() {
+                                return Promise.resolve({
+                                    level: 0.85 + Math.random() * 0.15,
+                                    charging: Math.random() > 0.5,
+                                    chargingTime: Math.random() * 7200,
+                                    dischargingTime: Math.random() * 14400
+                                });
+                            };
+                        }
+                    });
+                    
+                    // Giả mạo connection API
+                    Object.defineProperty(navigator, 'connection', {
+                        get: function() {
+                            return {
+                                effectiveType: '4g',
+                                downlink: 10,
+                                rtt: 50
+                            };
+                        }
+                    });
+                } catch(e) {}
             ");
 
-            // 13. Thay đổi chrome object
+            // 8. Thêm event listeners tự nhiên (MỚI)
             js.ExecuteScript(@"
-                window.chrome = {
-                    runtime: {},
-                };
+                try {
+                    // Giả mạo mouse movements
+                    document.addEventListener('mousemove', function(e) {
+                        // Chỉ để có event listener, không cần xử lý gì
+                    }, { passive: true });
+                    
+                    // Giả mạo keyboard events  
+                    document.addEventListener('keydown', function(e) {
+                        // Chỉ để có event listener, không cần xử lý gì
+                    }, { passive: true });
+                    
+                    // Giả mạo scroll events
+                    window.addEventListener('scroll', function(e) {
+                        // Chỉ để có event listener, không cần xử lý gì
+                    }, { passive: true });
+                } catch(e) {}
             ");
 
-            // 14. Thay đổi permissions API
-            js.ExecuteScript(@"
-                const originalQuery = window.navigator.permissions.query;
-                return window.navigator.permissions.query = (parameters) => (
-                    parameters.name === 'notifications' ?
-                        Promise.resolve({ state: Notification.permission }) :
-                        originalQuery(parameters)
-                );
-            ");
-
-            Console.WriteLine("✅ Đã inject thành công các script chống phát hiện automation");
+            Console.WriteLine("✅ Đã inject thành công các script chống phát hiện automation (cải tiến nâng cao)");
         }
         catch (Exception ex)
         {
@@ -1898,95 +2327,85 @@ class Program
     // Hàm mô phỏng thao tác người dùng thật: di chuột, rê chuột, cuộn trang, click linh tinh, delay ngẫu nhiên
     static void HumanLikeActions(IWebDriver driver)
     {
-        Random rnd = new Random();
-        int actionCount = rnd.Next(3, 7); // Tăng số lần thực hiện hành động
-        int width = driver.Manage().Window.Size.Width;
-        int height = driver.Manage().Window.Size.Height;
-
-        // Thêm thao tác mô phỏng người dùng thật hơn
-        for (int i = 0; i < actionCount; i++)
+        try 
         {
-            int actionType = rnd.Next(0, 8); // Tăng số loại hành động
-            switch (actionType)
+            int actionCount = _random.Next(2, 5); // Giảm số hành động để tự nhiên hơn
+            int width = driver.Manage().Window.Size.Width;
+            int height = driver.Manage().Window.Size.Height;
+            
+            Console.WriteLine($"🎭 Mô phỏng {actionCount} hành động người dùng thật...");
+
+            // ✅ THAO TÁC MÔ PHỎNG NGƯỜI DÙNG THẬT TỐI ƯU HÓA
+            for (int i = 0; i < actionCount; i++)
             {
-                case 0: // Di chuột đến vị trí ngẫu nhiên với tốc độ thay đổi
-                    int x = rnd.Next(0, width);
-                    int y = rnd.Next(0, height);
-                    try
-                    {
-                        var actions = new OpenQA.Selenium.Interactions.Actions(driver);
-                        actions.MoveByOffset(x, y).Perform();
-                        Thread.Sleep(rnd.Next(100, 500)); // Delay ngẫu nhiên
-                    }
-                    catch { }
-                    break;
-                case 1: // Cuộn trang ngẫu nhiên với tốc độ khác nhau
-                    int scrollY = rnd.Next(50, 400);
-                    int scrollSpeed = rnd.Next(100, 300);
-                    ((IJavaScriptExecutor)driver).ExecuteScript($"window.scrollBy({{top: {scrollY}, left: 0, behavior: 'smooth'}});");
-                    Thread.Sleep(scrollSpeed);
-                    break;
-                case 2: // Click linh tinh vào vị trí ngẫu nhiên (tránh click vào các trường nhập liệu)
-                    try
-                    {
-                        var body = driver.FindElement(By.TagName("body"));
-                        var actions = new OpenQA.Selenium.Interactions.Actions(driver);
-                        actions.MoveToElement(body, rnd.Next(0, width), rnd.Next(0, height)).Click().Perform();
-                    }
-                    catch { }
-                    break;
-                case 3: // Dừng lại ngẫu nhiên (giả vờ đọc)
-                    int pause = rnd.Next(800, 3000);
-                    Thread.Sleep(pause);
-                    break;
-                case 4: // Di chuột theo đường cong (mô phỏng người dùng thật)
-                    try
-                    {
-                        var actions = new OpenQA.Selenium.Interactions.Actions(driver);
-                        for (int j = 0; j < 5; j++)
+                int actionType = _random.Next(0, 6); // Giảm số loại hành động xuống các thao tác tự nhiên nhất
+                switch (actionType)
+                {
+                    case 0: // Cuộn trang nhẹ nhàng (thao tác phổ biến nhất)
+                        int scrollY = _random.Next(50, 200);
+                        ((IJavaScriptExecutor)driver).ExecuteScript($"window.scrollBy({{top: {scrollY}, left: 0, behavior: 'smooth'}});");
+                        Thread.Sleep(_random.Next(800, 2000));
+                        break;
+                        
+                    case 1: // Di chuyển chuột tự nhiên 
+                        try
                         {
-                            int curveX = rnd.Next(0, width);
-                            int curveY = rnd.Next(0, height);
-                            actions.MoveByOffset(curveX, curveY).Perform();
-                            Thread.Sleep(rnd.Next(50, 200));
-                        }
-                    }
-                    catch { }
-                    break;
-                case 5: // Cuộn ngang ngẫu nhiên
-                    int scrollX = rnd.Next(-100, 100);
-                    ((IJavaScriptExecutor)driver).ExecuteScript($"window.scrollBy({{top: 0, left: {scrollX}, behavior: 'smooth'}});");
-                    Thread.Sleep(rnd.Next(200, 600));
-                    break;
-                case 6: // Hover chuột trên các element ngẫu nhiên
-                    try
-                    {
-                        var elements = driver.FindElements(By.TagName("div"));
-                        if (elements.Count > 0)
-                        {
-                            var randomElement = elements[rnd.Next(0, Math.Min(elements.Count, 10))];
                             var actions = new OpenQA.Selenium.Interactions.Actions(driver);
-                            actions.MoveToElement(randomElement).Perform();
-                            Thread.Sleep(rnd.Next(300, 800));
+                            int x = _random.Next(100, width - 100);
+                            int y = _random.Next(100, height - 100);
+                            actions.MoveByOffset(x, y).Perform();
+                            Thread.Sleep(_random.Next(500, 1500));
                         }
-                    }
-                    catch { }
-                    break;
-                case 7: // Thay đổi focus ngẫu nhiên
-                    try
-                    {
-                        ((IJavaScriptExecutor)driver).ExecuteScript("document.activeElement.blur();");
-                        Thread.Sleep(rnd.Next(200, 500));
-                        ((IJavaScriptExecutor)driver).ExecuteScript("document.body.focus();");
-                    }
-                    catch { }
-                    break;
+                        catch { }
+                        break;
+                        
+                    case 2: // Dừng lại đọc (giả vờ đọc nội dung)
+                        Thread.Sleep(_random.Next(1500, 4000));
+                        break;
+                        
+                    case 3: // Hover trên các element để mô phỏng việc đọc
+                        try
+                        {
+                            var elements = driver.FindElements(By.TagName("span"));
+                            if (elements.Count > 0)
+                            {
+                                var randomElement = elements[_random.Next(0, Math.Min(elements.Count, 5))];
+                                var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                                actions.MoveToElement(randomElement).Perform();
+                                Thread.Sleep(_random.Next(800, 2000));
+                            }
+                        }
+                        catch { }
+                        break;
+                        
+                    case 4: // Cuộn nhẹ về phía trên
+                        int scrollUp = _random.Next(-100, -20);
+                        ((IJavaScriptExecutor)driver).ExecuteScript($"window.scrollBy({{top: {scrollUp}, left: 0, behavior: 'smooth'}});");
+                        Thread.Sleep(_random.Next(600, 1200));
+                        break;
+                        
+                    case 5: // Di chuyển chuột tự nhiên nhưng không click
+                        try
+                        {
+                            var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                            int x = _random.Next(100, width - 100);
+                            int y = _random.Next(100, height - 100);
+                            actions.MoveByOffset(x, y).Perform();
+                            Thread.Sleep(_random.Next(300, 800));
+                        }
+                        catch { }
+                        break;
+                }
+                // Delay ngẫu nhiên giữa các hành động
+                Thread.Sleep(_random.Next(200, 800));
             }
-            // Delay ngẫu nhiên giữa các hành động
-            Thread.Sleep(rnd.Next(200, 800));
+            // Dừng lại lâu hơn ở cuối
+            Thread.Sleep(_random.Next(1500, 3500));
         }
-        // Dừng lại lâu hơn ở cuối
-        Thread.Sleep(rnd.Next(1500, 3500));
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi trong HumanLikeActions: {ex.Message}");
+        }
     }
 
     static void ClickNextButtonAfterAuthenticatorKey(IWebDriver driver, string authKeyWithSpaces)

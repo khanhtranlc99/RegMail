@@ -630,8 +630,9 @@ namespace RegMail
             options.AddArgument("--disable-gpu");
             options.AddArgument("--disable-extensions");
             options.AddArgument("--disable-plugins");
-            options.AddArgument("--disable-images");
-            options.AddArgument("--disable-javascript");
+            // Loại bỏ --disable-images và --disable-javascript vì làm Google phát hiện automation
+            // options.AddArgument("--disable-images");
+            // options.AddArgument("--disable-javascript");
             options.AddArgument("--disable-default-apps");
             options.AddArgument("--disable-sync");
             options.AddArgument("--disable-background-networking");
@@ -665,7 +666,8 @@ namespace RegMail
             // Thêm các preference để thay đổi fingerprint
             options.AddUserProfilePreference("profile.default_content_setting_values.notifications", 2);
             options.AddUserProfilePreference("profile.default_content_settings.popups", 0);
-            options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
+            // Cho phép hiển thị hình ảnh để tránh phát hiện automation
+            // options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.media_stream", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.geolocation", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.mixed_script", 1);
@@ -688,7 +690,8 @@ namespace RegMail
             options.AddUserProfilePreference("intl.locale", "en-US");
             options.AddUserProfilePreference("intl.regional_locale", "en-US");
             options.AddUserProfilePreference("profile.default_content_setting_values.notifications", 2);
-            options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
+            // Cho phép hiển thị hình ảnh để tránh phát hiện automation
+            // options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.media_stream", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.geolocation", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.mixed_script", 1);
