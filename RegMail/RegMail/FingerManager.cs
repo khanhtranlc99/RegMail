@@ -534,26 +534,36 @@ namespace RegMail
 
         public static FingerprintInfo GenerateRandomFingerprint()
         {
-            return new FingerprintInfo
+            // Sử dụng seed ngẫu nhiên để đảm bảo tính nhất quán
+            int seed = Environment.TickCount + _random.Next(1000, 9999);
+            var localRandom = new Random(seed);
+            
+            // Tạo fingerprint với logic cải thiện để tránh trùng lặp
+            var fingerprint = new FingerprintInfo
             {
                 ProfileName = "Random Generated",
-                UserAgent = UserAgents[_random.Next(UserAgents.Length)],
-                Language = Languages[_random.Next(Languages.Length)],
-                Platform = Platforms[_random.Next(Platforms.Length)],
-                WebGLVendor = WebGLVendors[_random.Next(WebGLVendors.Length)],
-                WebGLRenderer = WebGLRenderers[_random.Next(WebGLRenderers.Length)],
+                UserAgent = UserAgents[localRandom.Next(UserAgents.Length)],
+                Language = Languages[localRandom.Next(Languages.Length)],
+                Platform = Platforms[localRandom.Next(Platforms.Length)],
+                WebGLVendor = WebGLVendors[localRandom.Next(WebGLVendors.Length)],
+                WebGLRenderer = WebGLRenderers[localRandom.Next(WebGLRenderers.Length)],
                 CanvasFingerprint = GenerateRandomCanvasFingerprint(),
-                ScreenResolution = ScreenResolutions[_random.Next(ScreenResolutions.Length)],
+                ScreenResolution = ScreenResolutions[localRandom.Next(ScreenResolutions.Length)],
                 ColorDepth = "24",
-                Timezone = Timezones[_random.Next(Timezones.Length)],
-                AcceptLanguage = Languages[_random.Next(Languages.Length)],
+                Timezone = Timezones[localRandom.Next(Timezones.Length)],
+                AcceptLanguage = Languages[localRandom.Next(Languages.Length)],
                 AcceptEncoding = "gzip, deflate, br",
                 ConnectionType = "4g",
-                DeviceMemory = _random.Next(4, 33).ToString(),
-                HardwareConcurrency = _random.Next(4, 17).ToString(),
-                TouchSupport = _random.Next(2) == 0 ? "true" : "false",
+                DeviceMemory = localRandom.Next(4, 33).ToString(),
+                HardwareConcurrency = localRandom.Next(4, 17).ToString(),
+                TouchSupport = localRandom.Next(2) == 0 ? "true" : "false",
                 DoNotTrack = "1"
             };
+            
+            // Thêm timestamp để đảm bảo tính duy nhất
+            fingerprint.ProfileName += $"_{DateTime.Now.Ticks % 10000}";
+            
+            return fingerprint;
         }
 
         private static string GenerateRandomCanvasFingerprint()
@@ -630,9 +640,8 @@ namespace RegMail
             options.AddArgument("--disable-gpu");
             options.AddArgument("--disable-extensions");
             options.AddArgument("--disable-plugins");
-            // Loại bỏ --disable-images và --disable-javascript vì làm Google phát hiện automation
-            // options.AddArgument("--disable-images");
-            // options.AddArgument("--disable-javascript");
+            options.AddArgument("--disable-images");
+            options.AddArgument("--disable-javascript");
             options.AddArgument("--disable-default-apps");
             options.AddArgument("--disable-sync");
             options.AddArgument("--disable-background-networking");
@@ -666,8 +675,7 @@ namespace RegMail
             // Thêm các preference để thay đổi fingerprint
             options.AddUserProfilePreference("profile.default_content_setting_values.notifications", 2);
             options.AddUserProfilePreference("profile.default_content_settings.popups", 0);
-            // Cho phép hiển thị hình ảnh để tránh phát hiện automation
-            // options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
+            options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.media_stream", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.geolocation", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.mixed_script", 1);
@@ -690,8 +698,7 @@ namespace RegMail
             options.AddUserProfilePreference("intl.locale", "en-US");
             options.AddUserProfilePreference("intl.regional_locale", "en-US");
             options.AddUserProfilePreference("profile.default_content_setting_values.notifications", 2);
-            // Cho phép hiển thị hình ảnh để tránh phát hiện automation
-            // options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
+            options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.media_stream", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.geolocation", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.mixed_script", 1);
