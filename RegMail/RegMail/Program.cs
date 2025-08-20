@@ -2167,11 +2167,7 @@ class Program
             Console.WriteLine("5. Xóa dữ liệu Chrome (xóa fingerprint cũ)");
             Console.WriteLine("6. Tạo fingerprint mới và test");
             Console.WriteLine("7. Xóa tất cả Chrome profiles đã lưu");
-            Console.WriteLine("8. Hiển thị danh sách Chrome profiles");
-            Console.WriteLine("9. Kiểm tra IP hiện tại (cho hotspot 4G)");
-            Console.WriteLine("10. Kiểm tra tính nhất quán fingerprint ngẫu nhiên");
-            Console.WriteLine("11. Test fingerprint thực tế với Chrome instances");
-            Console.WriteLine("12. Bắt đầu tạo tài khoản Gmail");
+            Console.WriteLine("8. Bắt đầu tạo tài khoản Gmail");
             Console.WriteLine("0. Thoát");
             Console.Write("Chọn tùy chọn: ");
 
@@ -2202,18 +2198,6 @@ class Program
                     ClearAllChromeProfiles();
                     break;
                 case "8":
-                    ShowChromeProfiles();
-                    break;
-                case "9":
-                    await CheckAndDisplayCurrentIP();
-                    break;
-                case "10":
-                    TestFingerprintConsistency();
-                    break;
-                case "11":
-                    TestRealFingerprintConsistency();
-                    break;
-                case "12":
                     return; // Thoát menu và tiếp tục chương trình
                 case "0":
                     Environment.Exit(0);
