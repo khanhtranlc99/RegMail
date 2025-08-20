@@ -103,6 +103,9 @@ class Program
             currentPassword = "";
             currentAuthenticatorKey = "";
             
+            // Biến theo dõi trang hiện tại (1 = trang đầu tiên)
+            int currentPage = 1;
+            
             
             ChromeOptions options = new ChromeOptions();
             
@@ -141,6 +144,7 @@ class Program
 
             Thread.Sleep(5000);
 
+
             // Inject JavaScript để thay đổi fingerprint và tránh phát hiện automation
             InjectAntiDetectionScripts(driver);
             
@@ -150,13 +154,13 @@ class Program
 
             string firstName = FillFirstName(driver);
             string lastName = FillLastName(driver);
-            ClickNextButton(driver);
+            ClickNextButton(driver, currentPage++);
             FillDayAndYearNew(driver);
             FillMonthNew(driver);
             FillGenderNew(driver);
-            ClickNextButton(driver);
+            ClickNextButton(driver, currentPage++);
             HumanLikeActions(driver);
-            ClickNextButton(driver);
+            ClickNextButton(driver, currentPage++);
             RandomDelay();
             
             // Kiểm tra xem có cần click "Create your own Gmail address" hay không
@@ -170,7 +174,7 @@ class Program
             currentGmail = email;
             currentPassword = password;
             
-            ClickNextButton(driver);
+            ClickNextButton(driver, currentPage++);
 
             await HandleRequestSever(driver, email, password);
             
@@ -604,7 +608,7 @@ class Program
                 
                 Console.WriteLine($"✅ Đã nhập username: {username}");
 
-                ClickNextButton(driver);
+                ClickNextButton(driver, 2);
                 Thread.Sleep(2000);
             }
             catch (Exception ex)
@@ -613,7 +617,7 @@ class Program
                 throw;
             }
 
-            ClickNextButton(driver);
+            ClickNextButton(driver, 2);
             Thread.Sleep(2000);
 
             try
@@ -753,67 +757,33 @@ class Program
         }
     }
 
-    static void ClickNextButton(IWebDriver driver)
+    static void ClickNextButton(IWebDriver driver, int currentPage = 1)
     {
         try
         {
             // Lưu URL hiện tại để kiểm tra xem có chuyển trang không
             string currentUrl = driver.Url;
             
-            // Kiểm tra trạng thái trang trước khi click
-            CheckPageState(driver, "trước khi click Next");
             
             // Tìm nút Next
             IWebElement nextButton = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
                 .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//span[contains(text(), 'Next')]")));
-
-            Console.WriteLine($"🔍 Tìm thấy nút Next, đang click...");
             
             IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
             // Scroll button vào view nếu cần
             js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButton);
             Thread.Sleep(300);
-            
-            // Click bằng JavaScript
             js.ExecuteScript("arguments[0].click();", nextButton);
-            Console.WriteLine($"✅ Đã click nút Next bằng JavaScript");
-            
-            // Thử click bằng Actions nếu JavaScript không hoạt động
-            Thread.Sleep(1000);
-            try
-            {
-                Actions actions = new Actions(driver);
-                actions.MoveToElement(nextButton).Click().Perform();
-                Console.WriteLine($"✅ Đã click nút Next bằng Actions");
-            }
-            catch (Exception actionEx)
-            {
-                Console.WriteLine($"⚠️ Không thể click bằng Actions: {actionEx.Message}");
-            }
-            
-            // Thử click trực tiếp bằng Selenium nếu cần
-            Thread.Sleep(500);
-            try
-            {
-                nextButton.Click();
-                Console.WriteLine($"✅ Đã click nút Next trực tiếp");
-            }
-            catch (Exception directEx)
-            {
-                Console.WriteLine($"⚠️ Không thể click trực tiếp: {directEx.Message}");
-            }
             
             // Chờ và kiểm tra xem trang có chuyển tiếp không
             bool pageChanged = false;
             int maxWaitTime = 15; // Tối đa 30 giây
             int waitTime = 0;
-            
-            // Kiểm tra trạng thái trang sau khi click
-            CheckPageState(driver, "sau khi click Next");
+           
             
             while (!pageChanged && waitTime < maxWaitTime)
             {
-                Thread.Sleep(1000);
+                Thread.Sleep(500);
                 waitTime++;
                 
                 try
@@ -822,51 +792,8 @@ class Program
                     if (newUrl != currentUrl)
                     {
                         pageChanged = true;
-                        Console.WriteLine($"✅ Trang đã chuyển tiếp thành công! URL mới: {newUrl}");
                         break;
                     }
-                    
-                    // Kiểm tra xem có thông báo lỗi validation không
-                    try
-                    {
-                        var errorElements = driver.FindElements(By.XPath("//div[contains(@class, 'error') or contains(@class, 'invalid') or contains(text(), 'error') or contains(text(), 'invalid')]"));
-                        if (errorElements.Count > 0)
-                        {
-                            foreach (var error in errorElements)
-                            {
-                                string errorText = error.Text.Trim();
-                                if (!string.IsNullOrEmpty(errorText))
-                                {
-                                    Console.WriteLine($"⚠️ Phát hiện lỗi validation: {errorText}");
-                                }
-                            }
-                        }
-                    }
-                    catch { }
-                    
-                    // Kiểm tra xem có loading spinner không
-                    try
-                    {
-                        var loadingElements = driver.FindElements(By.XPath("//div[contains(@class, 'loading') or contains(@class, 'spinner') or @aria-label='Loading']"));
-                        if (loadingElements.Count > 0)
-                        {
-                            Console.WriteLine($"⏳ Đang chờ trang load... ({waitTime}/{maxWaitTime}s)");
-                        }
-                    }
-                    catch { }
-                    
-                    // Kiểm tra xem nút Next có còn disabled không
-                    try
-                    {
-                        var nextButtonAfterClick = driver.FindElement(By.XPath("//span[contains(text(), 'Next')]"));
-                        if (nextButtonAfterClick.GetAttribute("disabled") == "true" || 
-                            nextButtonAfterClick.GetAttribute("aria-disabled") == "true")
-                        {
-                            Console.WriteLine($"⚠️ Nút Next vẫn bị disabled, có thể có lỗi validation");
-                        }
-                    }
-                    catch { }
-                    
                 }
                 catch (Exception ex)
                 {
@@ -876,15 +803,8 @@ class Program
             
             if (!pageChanged)
             {
-                Console.WriteLine($"⚠️ Trang không chuyển tiếp sau {maxWaitTime} giây. Có thể có lỗi validation hoặc network issue.");
-                
-                // Thử click lại một lần nữa
                 try
                 {
-                    Console.WriteLine($"🔄 Thử click lại nút Next...");
-                    var nextButtonRetry = driver.FindElement(By.XPath("//span[contains(text(), 'Next')]"));
-                    js.ExecuteScript("arguments[0].click();", nextButtonRetry);
-                    Thread.Sleep(3000);
                     
                     string finalUrl = driver.Url;
                     if (finalUrl != currentUrl)
@@ -893,40 +813,45 @@ class Program
                     }
                     else
                     {
-                        Console.WriteLine($"❌ Vẫn không chuyển trang được. URL cuối: {finalUrl}");
-                        
-                        // Thử reload trang và click lại (mô phỏng hành động thủ công)
-                        Console.WriteLine($"🔄 Thử reload trang và click lại Next...");
-                        try
+                        // Chỉ reload trang khi ở trang đầu tiên
+                        if (currentPage == 1)
                         {
-                            // Reload trang
-                            driver.Navigate().Refresh();
-                            Thread.Sleep(3000); // Chờ trang load xong
-                            
-                            // Tìm và click nút Next sau khi reload
-                            var nextButtonAfterReload = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
-                                .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//span[contains(text(), 'Next')]")));
-                            
-                            js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButtonAfterReload);
-                            Thread.Sleep(300);
-                            js.ExecuteScript("arguments[0].click();", nextButtonAfterReload);
-                            
-                            // Chờ thêm 5 giây để xem có chuyển trang không
-                            Thread.Sleep(5000);
-                            string urlAfterReload = driver.Url;
-                            
-                            if (urlAfterReload != currentUrl)
+                            try
                             {
-                                Console.WriteLine($"✅ Reload và click thành công! URL mới: {urlAfterReload}");
+                                Console.WriteLine("🔄 Đang reload trang (chỉ ở trang đầu tiên)...");
+                                // Reload trang
+                                driver.Navigate().Refresh();
+                                Thread.Sleep(3000); // Chờ trang load xong
+                                
+                                // Tìm và click nút Next sau khi reload
+                                var nextButtonAfterReload = new WebDriverWait(driver, TimeSpan.FromSeconds(10))
+                                    .Until(SeleniumExtras.WaitHelpers.ExpectedConditions.ElementToBeClickable(By.XPath("//span[contains(text(), 'Next')]")));
+                                
+                                js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButtonAfterReload);
+                                Thread.Sleep(300);
+                                js.ExecuteScript("arguments[0].click();", nextButtonAfterReload);
+                                
+                                // Chờ thêm 5 giây để xem có chuyển trang không
+                                Thread.Sleep(5000);
+                                string urlAfterReload = driver.Url;
+                                
+                                if (urlAfterReload != currentUrl)
+                                {
+                                    Console.WriteLine($"✅ Reload và click thành công! URL mới: {urlAfterReload}");
+                                }
+                                else
+                                {
+                                    Console.WriteLine($"❌ Vẫn không chuyển trang được sau khi reload. URL cuối: {urlAfterReload}");
+                                }
                             }
-                            else
+                            catch (Exception reloadEx)
                             {
-                                Console.WriteLine($"❌ Vẫn không chuyển trang được sau khi reload. URL cuối: {urlAfterReload}");
+                                Console.WriteLine($"❌ Không thể reload và click lại: {reloadEx.Message}");
                             }
                         }
-                        catch (Exception reloadEx)
+                        else
                         {
-                            Console.WriteLine($"❌ Không thể reload và click lại: {reloadEx.Message}");
+                            Console.WriteLine($"⚠️ Không reload trang vì đang ở trang {currentPage} (chỉ reload ở trang đầu tiên)");
                         }
                     }
                 }
@@ -939,24 +864,6 @@ class Program
         catch (Exception ex)
         {
             Console.WriteLine($"❌ Lỗi click Next: {ex.Message}");
-            // Thử lại một lần nữa nếu gặp lỗi
-            try
-            {
-                Console.WriteLine($"🔄 Thử tìm và click nút Next lần nữa...");
-                IWebElement nextButton = driver.FindElement(By.XPath("//span[contains(text(), 'Next')]"));
-                IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
-                js.ExecuteScript("arguments[0].scrollIntoView({block: 'center', inline: 'nearest'});", nextButton);
-                Thread.Sleep(300);
-                js.ExecuteScript("arguments[0].click();", nextButton);
-                Thread.Sleep(3000);
-                
-                string finalUrl = driver.Url;
-                Console.WriteLine($"🔄 Sau khi thử lại, URL: {finalUrl}");
-            }
-            catch (Exception retryEx)
-            {
-                Console.WriteLine($"❌ Vẫn không click được Next: {retryEx.Message}");
-            }
         }
     }
     
@@ -1334,49 +1241,56 @@ class Program
     {
         try
         {
-            // Thử tìm element chứa text "Create your own Gmail address"
-            var createOwnOption = new WebDriverWait(driver, TimeSpan.FromSeconds(5))
-                .Until(d => d.FindElement(By.XPath("//*[contains(text(), 'Create your own Gmail address')]")));
-
-            // Click vào option này (thường là label hoặc span)
-            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
-            js.ExecuteScript("arguments[0].click();", createOwnOption);
-
-            Console.WriteLine("✅ Đã chọn 'Create your own Gmail address'");
-        }
-        catch (WebDriverTimeoutException)
-        {
-            // Nếu không tìm thấy option "Create your own Gmail address", kiểm tra xem có popup không
-            Console.WriteLine("ℹ️ Không tìm thấy option 'Create your own Gmail address', kiểm tra popup...");
+            Console.WriteLine("🔍 Đang tìm kiếm option 'Create your own Gmail address'...");
             
-            // Kiểm tra xem có popup "How you'll sign in" không
-            try
+            // Kiểm tra xem có element "Create your own Gmail address" không
+            var createOwnElements = driver.FindElements(By.XPath("//*[contains(text(), 'Create your own Gmail address')]"));
+            
+            if (createOwnElements.Count > 0)
             {
-                var popupTitle = driver.FindElement(By.XPath("//*[contains(text(), 'How you'll sign in') or contains(text(), 'Create a Gmail address for signing in')]"));
-                Console.WriteLine("✅ Phát hiện popup 'How you'll sign in', đây là trường hợp bình thường");
-                
-                // Kiểm tra xem có trường Username trong popup không
-                try
-                {
-                    var usernameField = driver.FindElement(By.XPath("//input[@aria-label='Username' or @aria-label='Create a Gmail address' or contains(@aria-label, 'username')]"));
-                    Console.WriteLine("✅ Trường Username đã có sẵn trong popup, tiếp tục bình thường");
-                }
-                catch (NoSuchElementException)
-                {
-                    Console.WriteLine("⚠️ Không tìm thấy trường Username trong popup, có thể cần thao tác khác");
-                }
+                // Nếu tìm thấy, click vào element đầu tiên
+                var createOwnOption = createOwnElements[0];
+                IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+                js.ExecuteScript("arguments[0].click();", createOwnOption);
+                Console.WriteLine("✅ Đã chọn 'Create your own Gmail address'");
             }
-            catch (NoSuchElementException)
+            else
             {
-                // Nếu không có popup, kiểm tra xem có trường Username nào đã hiển thị chưa
-                try
+                // Nếu không tìm thấy, kiểm tra các trường hợp khác
+                Console.WriteLine("ℹ️ Không tìm thấy option 'Create your own Gmail address', kiểm tra các trường hợp khác...");
+                
+                // Kiểm tra xem có popup "How you'll sign in" không
+                var popupElements = driver.FindElements(By.XPath("//*[contains(text(), 'How you'll sign in') or contains(text(), 'Create a Gmail address for signing in')]"));
+                
+                if (popupElements.Count > 0)
                 {
-                    var existingUsernameField = driver.FindElement(By.XPath("//input[@aria-label='Username' or @aria-label='Create a Gmail address']"));
-                    Console.WriteLine("✅ Trường Username đã có sẵn, không cần click thêm");
+                    Console.WriteLine("✅ Phát hiện popup 'How you'll sign in', đây là trường hợp bình thường");
+                    
+                    // Kiểm tra xem có trường Username trong popup không
+                    var usernameFields = driver.FindElements(By.XPath("//input[@aria-label='Username' or @aria-label='Create a Gmail address' or contains(@aria-label, 'username')]"));
+                    
+                    if (usernameFields.Count > 0)
+                    {
+                        Console.WriteLine("✅ Trường Username đã có sẵn trong popup, tiếp tục bình thường");
+                    }
+                    else
+                    {
+                        Console.WriteLine("⚠️ Không tìm thấy trường Username trong popup, có thể cần thao tác khác");
+                    }
                 }
-                catch (NoSuchElementException)
+                else
                 {
-                    Console.WriteLine("⚠️ Không tìm thấy trường Username nào, có thể cần thao tác khác");
+                    // Nếu không có popup, kiểm tra xem có trường Username nào đã hiển thị chưa
+                    var existingUsernameFields = driver.FindElements(By.XPath("//input[@aria-label='Username' or @aria-label='Create a Gmail address']"));
+                    
+                    if (existingUsernameFields.Count > 0)
+                    {
+                        Console.WriteLine("✅ Trường Username đã có sẵn, không cần click thêm");
+                    }
+                    else
+                    {
+                        Console.WriteLine("⚠️ Không tìm thấy trường Username nào, có thể cần thao tác khác");
+                    }
                 }
             }
         }
@@ -1521,7 +1435,6 @@ class Program
             {
                 js.ExecuteScript("arguments[0].click();", addPhoneBtn);
                 clickSuccess = true;
-                Console.WriteLine("✅ Click thành công bằng JavaScript");
             }
             catch (Exception ex)
             {
@@ -1533,7 +1446,6 @@ class Program
             {
                 try
                 {
-                    Console.WriteLine("🖱️ Thử click bằng Actions...");
                     var actions = new OpenQA.Selenium.Interactions.Actions(driver);
                     actions.MoveToElement(addPhoneBtn).Click().Perform();
                     clickSuccess = true;
@@ -1550,10 +1462,8 @@ class Program
             {
                 try
                 {
-                    Console.WriteLine("🖱️ Thử click thường...");
                     addPhoneBtn.Click();
                     clickSuccess = true;
-                    Console.WriteLine("✅ Click thành công bằng Selenium");
                 }
                 catch (Exception ex)
                 {
@@ -1625,7 +1535,6 @@ class Program
             Thread.Sleep(200);
             js.ExecuteScript("arguments[0].click();", doneButton);
             Thread.Sleep(1000);
-            Console.WriteLine("✅ Đã ấn nút Done sau khi xác nhận số điện thoại 2FA");
         }
         catch (Exception ex)
         {
@@ -1661,9 +1570,6 @@ class Program
     {
         try
         {
-            Console.WriteLine("🔍 Đang tìm link 'Can't scan it?'...");
-            
-            // Đợi một chút để đảm bảo popup QR code đã hiển thị
             Thread.Sleep(2000);
             
             IWebElement cantScanLink = null;
@@ -1701,10 +1607,8 @@ class Program
                 // Thử click trực tiếp trước
                 try
                 {
-                    Console.WriteLine("🖱️ Thử click trực tiếp...");
                     cantScanLink.Click();
                     Thread.Sleep(1000);
-                    Console.WriteLine("✅ Đã click trực tiếp thành công");
                     return;
                 }
                 catch (Exception ex1)
@@ -1715,10 +1619,8 @@ class Program
                 // Thử JavaScript click
                 try
                 {
-                    Console.WriteLine("🖱️ Thử JavaScript click...");
                     js.ExecuteScript("arguments[0].click();", cantScanLink);
                     Thread.Sleep(1000);
-                    Console.WriteLine("✅ Đã JavaScript click thành công");
                     return;
                 }
                 catch (Exception ex1)
@@ -1729,11 +1631,9 @@ class Program
                 // Thử Actions click
                 try
                 {
-                    Console.WriteLine("🖱️ Thử Actions click...");
                     var actions = new OpenQA.Selenium.Interactions.Actions(driver);
                     actions.MoveToElement(cantScanLink).Click().Perform();
                     Thread.Sleep(1000);
-                    Console.WriteLine("✅ Đã Actions click thành công");
                     return;
                 }
                 catch (Exception ex2)
@@ -1744,7 +1644,6 @@ class Program
                 // Thử hover trước rồi click
                 try
                 {
-                    Console.WriteLine("🖱️ Thử hover trước rồi click...");
                     var actions = new OpenQA.Selenium.Interactions.Actions(driver);
 
                     // Hover vào element trước
@@ -1754,7 +1653,6 @@ class Program
                     // Sau đó click
                     actions.Click().Perform();
                     Thread.Sleep(1000);
-                    Console.WriteLine("✅ Đã hover và click thành công");
                 }
                 catch (Exception ex3)
                 {
@@ -1777,7 +1675,6 @@ class Program
         try
         {
             Thread.Sleep(2000); // Tăng thời gian đợi popup xuất hiện
-            Console.WriteLine("🔍 Đang tìm popup chứa key Authenticator...");
             
             // Đợi popup xuất hiện và tìm element chứa key
             IWebElement popup = null;
@@ -1786,7 +1683,6 @@ class Program
             // Tìm kiếm trực tiếp thẻ strong chứa key
             if (popup == null || !IsValidAuthenticatorKey(popupText))
             {
-                Console.WriteLine("🔍 Tìm kiếm trực tiếp thẻ strong chứa key...");
                 try
                 {
                     var strongElements = driver.FindElements(By.TagName("strong"));
@@ -1799,7 +1695,6 @@ class Program
                             if (IsValidAuthenticatorKey(strongText))
                             {
                                 popupText = strongText;
-                                Console.WriteLine($"✅ Tìm thấy key trong thẻ strong: {strongText}");
                                 break;
                             }
                         }
