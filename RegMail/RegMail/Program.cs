@@ -90,7 +90,7 @@ class Program
         int spacing = 10;
         int width = 500;
         int height = 700;
-        string signupUrl = "https://accounts.google.com/signup";
+        string signupUrl = ConfigManager.Google_Signup_URL;
 
         for (int i = 0; i < tabCount; i++)
         {
@@ -110,14 +110,29 @@ class Program
             ChromeOptions options = new ChromeOptions();
             
             // Dọn dẹp các thư mục user data cũ và kill process Chrome cũ
-            AdvancedChromeConfig.CleanupOldUserDataDirectories();
-            AdvancedChromeConfig.KillOldChromeProcesses();
+            AdvancedChromeConfig.CleanupStableProfile();
+            AdvancedChromeConfig.KillChromeProcessesForProfile();
             
             // CẤU HÌNH CHROME ANTI-DETECTION NÂNG CAO
             AdvancedChromeConfig.ConfigureAdvancedChromeOptions(options, width, height, posX, posY);
 
             // Tạo fingerprint HOÀN TOÀN ĐỘC NHẤT cho mỗi tab (QUAN TRỌNG)
+            // Sử dụng ChromeOptionsManager để tạo cấu hình Chrome
             var fingerprint = FingerprintManager.GetRandomProfile();
+            string userDataDir = AdvancedChromeConfig.CreateUniqueUserDataDirectory();
+            
+            if (ConfigManager.Chrome_Use_Minimal_Flags)
+            {
+                options = ChromeOptionsManager.CreateMinimalOptions(userDataDir);
+                Console.WriteLine("ℹ️ Sử dụng cấu hình Chrome tối thiểu");
+            }
+            else
+            {
+                options = ChromeOptionsManager.CreateAdvancedOptions(userDataDir);
+                Console.WriteLine("ℹ️ Sử dụng cấu hình Chrome nâng cao");
+            }
+            
+            // Áp dụng fingerprint
             FingerprintManager.ConfigureChromeOptions(options, fingerprint);
             
             // Khởi tạo ChromeDriver với xử lý lỗi
@@ -128,16 +143,9 @@ class Program
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("session not created"))
             {
-                Console.WriteLine("⚠️ Lỗi session Chrome, thử lại với cấu hình khác...");
-                // Thử lại với cấu hình đơn giản hơn
-                options = new ChromeOptions();
-                options.AddArgument("--no-sandbox");
-                options.AddArgument("--disable-dev-shm-usage");
-                options.AddArgument("--disable-gpu");
-                options.AddArgument("--remote-debugging-port=0");
-                string fallbackUserDataDir = AdvancedChromeConfig.CreateUniqueUserDataDirectory();
-                options.AddArgument($"--user-data-dir={fallbackUserDataDir}");
-                
+                Console.WriteLine("⚠️ Lỗi session Chrome, thử lại với cấu hình tối thiểu...");
+                // Thử lại với cấu hình tối thiểu
+                options = ChromeOptionsManager.CreateMinimalOptions(userDataDir);
                 driver = new ChromeDriver(options);
             }
             driver.Navigate().GoToUrl(signupUrl);
@@ -267,7 +275,7 @@ class Program
             Console.WriteLine($"🔐 Bắt đầu đăng nhập và đồng bộ hóa Gmail: {email}");
             
             // Chuyển đến trang Gmail
-            driver.Navigate().GoToUrl("https://mail.google.com");
+            driver.Navigate().GoToUrl(ConfigManager.Google_Mail_URL);
             Thread.Sleep(3000);
             
             // Kiểm tra xem đã đăng nhập hay chưa
@@ -372,22 +380,22 @@ class Program
             Console.WriteLine("🔄 Đang kích hoạt đồng bộ hóa với các dịch vụ Google...");
             
             // Kích hoạt Google Drive
-            driver.Navigate().GoToUrl("https://drive.google.com");
+            driver.Navigate().GoToUrl(ConfigManager.Google_Drive_URL);
             Thread.Sleep(2000);
             Console.WriteLine("✅ Đã kích hoạt Google Drive");
             
             // Kích hoạt Google Photos
-            driver.Navigate().GoToUrl("https://photos.google.com");
+            driver.Navigate().GoToUrl(ConfigManager.Google_Photos_URL);
             Thread.Sleep(2000);
             Console.WriteLine("✅ Đã kích hoạt Google Photos");
             
             // Kích hoạt YouTube
-            driver.Navigate().GoToUrl("https://youtube.com");
+            driver.Navigate().GoToUrl(ConfigManager.Google_YouTube_URL);
             Thread.Sleep(2000);
             Console.WriteLine("✅ Đã kích hoạt YouTube");
             
             // Quay lại Gmail để đảm bảo hoạt động bình thường
-            driver.Navigate().GoToUrl("https://mail.google.com");
+            driver.Navigate().GoToUrl(ConfigManager.Google_Mail_URL);
             Thread.Sleep(2000);
             
             // Bật sync trong Chrome (nếu có thể)
@@ -401,9 +409,15 @@ class Program
         }
     }
     
-    // Hàm bật Chrome Sync (nếu có thể)
+    // Hàm bật Chrome Sync (nếu có thể) - Chỉ thực hiện khi được cấu hình
     static void EnableChromeSync(IWebDriver driver)
     {
+        if (!ConfigManager.Chrome_Enable_Sync)
+        {
+            Console.WriteLine("ℹ️ Chrome Sync đã được tắt trong cấu hình");
+            return;
+        }
+        
         try
         {
             Console.WriteLine("🔄 Đang cố gắng bật Chrome Sync...");
@@ -435,44 +449,16 @@ class Program
         }
     }
 
-    // Hàm nhập từng ký tự một với delay ngẫu nhiên và backspace ngẫu nhiên
+    // Hàm nhập từng ký tự một với delay ngẫu nhiên đơn giản (không có backspace hay double type)
     static void HumanType(IWebElement element, string text)
     {
         Random randomDelay = new Random();
-        Random randomBackspace = new Random();
         
         for (int i = 0; i < text.Length; i++)
         {
             char c = text[i];
             element.SendKeys(c.ToString());
             Thread.Sleep(randomDelay.Next(80, 180));
-            
-            // Có 5% khả năng sẽ backspace ngẫu nhiên (mô phỏng lỗi gõ phím)
-            if (randomBackspace.Next(1, 21) == 1) // 5% chance
-            {
-                // Backspace 1-2 ký tự
-                int backspaceCount = randomBackspace.Next(1, 3);
-                for (int j = 0; j < backspaceCount; j++)
-                {
-                    element.SendKeys(OpenQA.Selenium.Keys.Backspace);
-                    Thread.Sleep(randomDelay.Next(50, 120));
-                }
-                
-                // Nhập lại các ký tự đã bị xóa
-                for (int j = 0; j < backspaceCount; j++)
-                {
-                    int index = Math.Max(0, i - backspaceCount + j + 1);
-                    if (index < text.Length)
-                    {
-                        element.SendKeys(text[index].ToString());
-                        Thread.Sleep(randomDelay.Next(60, 150));
-                    }
-                }
-                
-                // Nhập lại ký tự hiện tại
-                element.SendKeys(c.ToString());
-                Thread.Sleep(randomDelay.Next(80, 180));
-            }
         }
     }
 
@@ -783,7 +769,7 @@ class Program
             
             while (!pageChanged && waitTime < maxWaitTime)
             {
-                Thread.Sleep(500);
+                Thread.Sleep(200);
                 waitTime++;
                 
                 try
@@ -848,10 +834,6 @@ class Program
                             {
                                 Console.WriteLine($"❌ Không thể reload và click lại: {reloadEx.Message}");
                             }
-                        }
-                        else
-                        {
-                            Console.WriteLine($"⚠️ Không reload trang vì đang ở trang {currentPage} (chỉ reload ở trang đầu tiên)");
                         }
                     }
                 }
@@ -1007,7 +989,7 @@ class Program
     static async Task<string> HandleRequestSever(IWebDriver driver, string userNameParam, string passwordParam)
     {
         var client = new HttpClient();
-        string url = "https://dailyotp.com/api/rent-number?appBrand=Google / Gmail / Youtube&countryCode=US&serverName=Server 1&api_key=4cdba4a83cb5e06bf4f81bb491f7a434vUo9b9CciGZ1VPPjbDcj";
+        string url = $"{ConfigManager.DailyOTP_RentNumber_URL}?appBrand=Google / Gmail / Youtube&countryCode=US&serverName=Server 1&api_key={ConfigManager.DailyOTP_API_Key}";
 
         HttpResponseMessage response = await client.GetAsync(url);
         string body = await response.Content.ReadAsStringAsync();
@@ -1053,7 +1035,7 @@ class Program
 
     static async Task HandleGetCode(IWebDriver driver, string transId, string userNameParam, string passwordParam)
     {
-        string url = $"https://dailyotp.com/api/get-messages?transId={transId}&api_key=4cdba4a83cb5e06bf4f81bb491f7a434vUo9b9CciGZ1VPPjbDcj";
+        string url = $"{ConfigManager.DailyOTP_GetMessages_URL}?transId={transId}&api_key={ConfigManager.DailyOTP_API_Key}";
         var client = new HttpClient();
 
         int retry = 0;
@@ -1375,7 +1357,7 @@ class Program
     {
         try
         {
-            string url2FA = "https://myaccount.google.com/signinoptions/twosv";
+            string url2FA = ConfigManager.Google_2FA_URL;
             driver.Navigate().GoToUrl(url2FA);
             Thread.Sleep(3000);
             Console.WriteLine("✅ Đã truy cập vào trang bảo mật 2FA của Google");
@@ -1547,7 +1529,7 @@ class Program
         try
         {
             // Truy cập vào trang Authenticator app
-            string urlAuthApp = "https://myaccount.google.com/two-step-verification/authenticator";
+            string urlAuthApp = ConfigManager.Google_Authenticator_URL;
             driver.Navigate().GoToUrl(urlAuthApp);
             Thread.Sleep(3000);
             // Tìm và click nút Set up authenticator
@@ -2036,7 +2018,7 @@ class Program
     static void Remove2FAPhoneNumber(IWebDriver driver)
     {
         // Quay lại trang 2FA phone
-        string url2FA = "https://myaccount.google.com/two-step-verification/phone-numbers";
+                    string url2FA = ConfigManager.Google_PhoneNumbers_URL;
         driver.Navigate().GoToUrl(url2FA);
         Thread.Sleep(3000);
         Console.WriteLine("🔍 Đang tìm kiếm các button có thể xóa...");
@@ -2112,7 +2094,7 @@ class Program
             using (var client = new HttpClient())
             {
                 client.Timeout = TimeSpan.FromSeconds(10);
-                string response = await client.GetStringAsync("https://api.ipify.org");
+                string response = await client.GetStringAsync(ConfigManager.IP_Check_URL);
                 return response.Trim();
             }
         }
@@ -3140,12 +3122,10 @@ class Program
                 {
                     string currentValue = element.GetAttribute("value");
                     string expectedValue = text.Substring(0, Math.Min(currentPosition, text.Length));
-                    Console.WriteLine($"📊 Kiểm tra định kỳ [{currentPosition}/{text.Length}]: expected='{expectedValue}', actual='{currentValue}'");
                     
                     // Nếu có sự khác biệt lớn, sửa lại
                     if (currentValue.Length < expectedValue.Length - 2 || currentValue.Length > expectedValue.Length + 2)
                     {
-                        Console.WriteLine($"⚠️ Phát hiện sự khác biệt lớn, đang sửa lại...");
                         element.Clear();
                         Thread.Sleep(200);
                         element.SendKeys(expectedValue);
@@ -3163,31 +3143,15 @@ class Program
         try
         {
             string finalValue = element.GetAttribute("value");
-            Console.WriteLine($"🔍 Kiểm tra cuối cùng - Mong muốn: '{text}', Thực tế: '{finalValue}'");
             
             if (finalValue != text)
             {
-                Console.WriteLine($"🔧 Phát hiện lỗi cuối cùng, đang sửa lại...");
                 element.Clear();
                 Thread.Sleep(200);
                 element.SendKeys(text);
                 Thread.Sleep(200);
                 
                 string correctedValue = element.GetAttribute("value");
-                Console.WriteLine($"🔧 Sau khi sửa cuối cùng: '{correctedValue}'");
-                
-                if (correctedValue != text)
-                {
-                    Console.WriteLine($"⚠️ Vẫn còn lỗi sau khi sửa! Mong muốn: '{text}', Thực tế: '{correctedValue}'");
-                }
-                else
-                {
-                    Console.WriteLine($"✅ Đã sửa thành công!");
-                }
-            }
-            else
-            {
-                Console.WriteLine($"✅ Kết quả cuối cùng chính xác: '{finalValue}'");
             }
         }
         catch (Exception ex)
@@ -3491,45 +3455,10 @@ class Program
                 var fingerprint = FingerprintManager.GenerateRandomFingerprint();
                 fingerprints.Add(fingerprint);
                 
-                // Tạo Chrome options với fingerprint
-                ChromeOptions options = new ChromeOptions();
+                // Tạo Chrome options với fingerprint sử dụng ChromeOptionsManager
+                string userDataDir = AdvancedChromeConfig.CreateUniqueUserDataDirectory();
+                ChromeOptions options = ChromeOptionsManager.CreateAdvancedOptions(userDataDir);
                 options.AddArgument("--headless"); // Chạy ẩn để test nhanh
-                options.AddArgument("--no-sandbox");
-                options.AddArgument("--disable-dev-shm-usage");
-                options.AddArgument("--disable-gpu");
-                options.AddArgument("--disable-extensions");
-                options.AddArgument("--disable-plugins");
-                options.AddArgument("--disable-images");
-                options.AddArgument("--disable-javascript");
-                options.AddArgument("--disable-default-apps");
-                options.AddArgument("--disable-sync");
-                options.AddArgument("--disable-background-networking");
-                options.AddArgument("--disable-background-timer-throttling");
-                options.AddArgument("--disable-client-side-phishing-detection");
-                options.AddArgument("--disable-component-extensions-with-background-pages");
-                options.AddArgument("--disable-hang-monitor");
-                options.AddArgument("--disable-ipc-flooding-protection");
-                options.AddArgument("--disable-renderer-backgrounding");
-                options.AddArgument("--disable-backgrounding-occluded-windows");
-                options.AddArgument("--disable-features=TranslateUI");
-                options.AddArgument("--disable-ignore-certificate-errors");
-                options.AddArgument("--disable-extensions-file-access-check");
-                options.AddArgument("--disable-extensions-http-throttling");
-                options.AddArgument("--disable-features=site-per-process");
-                options.AddArgument("--disable-site-isolation-trials");
-                options.AddArgument("--disable-web-security");
-                options.AddArgument("--disable-features=VizDisplayCompositor");
-                options.AddArgument("--disable-features=TranslateUI");
-                options.AddArgument("--disable-features=BlinkGenPropertyTrees");
-                options.AddArgument("--disable-features=ImprovedCookieControls");
-                options.AddArgument("--disable-features=SameSiteByDefaultCookies");
-                options.AddArgument("--disable-features=CookiesWithoutSameSiteMustBeSecure");
-                options.AddArgument("--disable-features=AutoupgradeMixedContent");
-                options.AddArgument("--disable-features=AutoupgradeImageAds");
-                options.AddArgument("--disable-features=AutoupgradeMixedContent");
-                options.AddArgument("--disable-features=AutoupgradeImageAds");
-                options.AddArgument("--disable-features=AutoupgradeMixedContent");
-                options.AddArgument("--disable-features=AutoupgradeImageAds");
                 
                 // Cấu hình fingerprint
                 FingerprintManager.ConfigureChromeOptions(options, fingerprint);
