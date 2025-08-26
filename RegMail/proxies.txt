@@ -1,0 +1,36 @@
+# File cấu hình proxy cho RegMail
+# Format có thể là:
+# 1. host:port (HTTP proxy không auth)
+# 2. host:port:username:password (HTTP proxy có auth)  
+# 3. http://host:port (HTTP proxy rõ ràng)
+# 4. https://host:port (HTTPS proxy)
+# 5. socks5://host:port (SOCKS5 proxy không auth)
+# 6. socks5://host:port:username:password (SOCKS5 proxy có auth)
+
+# ============================================
+# VÍ DỤ HTTP PROXY:
+# ============================================
+# 192.168.1.100:8080
+# http://proxy.example.com:3128:user:pass
+
+# ============================================
+# VÍ DỤ SOCKS5 PROXY (KHUYẾN NGHỊ):
+# ============================================
+# socks5://127.0.0.1:1080
+# socks5://proxy.example.com:1080:user:pass
+
+# ============================================
+# PROXY CỦA BẠN:
+# ============================================
+
+# HTTP Proxy hiện tại:
+1.52.178.123:23318:YAMiHB:petgbc
+113.181.251.114:33270:BXExOT:fnaamh
+
+# SOCKS5 Proxy (thêm thông tin proxy của bạn):
+# socks5://1.53.224.157:27434:lcXcvo:password
+# Hoặc nếu không có password:
+socks5://1.53.224.157:27434:lcXcvo
+
+# Thêm SOCKS5 proxy khác vào đây:
+# socks5://your.socks5.server:port:username:password

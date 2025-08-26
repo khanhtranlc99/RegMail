@@ -573,7 +573,7 @@ namespace RegMail
             return new string(Enumerable.Repeat(chars, 32).Select(s => s[_random.Next(s.Length)]).ToArray());
         }
 
-        public static void ConfigureChromeOptions(ChromeOptions options, FingerprintInfo fingerprint)
+        public static void ConfigureChromeOptions(ChromeOptions options, FingerprintInfo fingerprint = null)
         {
             if (fingerprint == null)
             {
@@ -632,35 +632,20 @@ namespace RegMail
             // Cấu hình để tránh phát hiện automation
             options.AddArgument("--disable-blink-features=AutomationControlled");
             options.AddExcludedArgument("enable-automation");
-            options.AddArgument("--disable-web-security");
-            options.AddArgument("--allow-running-insecure-content");
             options.AddArgument("--disable-features=VizDisplayCompositor");
             options.AddArgument("--disable-dev-shm-usage");
             options.AddArgument("--no-sandbox");
-            options.AddArgument("--disable-gpu");
-            options.AddArgument("--disable-extensions");
-            options.AddArgument("--disable-plugins");
-            options.AddArgument("--disable-images");
-            options.AddArgument("--disable-javascript");
             options.AddArgument("--disable-default-apps");
             options.AddArgument("--disable-sync");
-            options.AddArgument("--disable-background-networking");
             options.AddArgument("--disable-background-timer-throttling");
             options.AddArgument("--disable-client-side-phishing-detection");
             options.AddArgument("--disable-component-extensions-with-background-pages");
             options.AddArgument("--disable-hang-monitor");
             options.AddArgument("--disable-ipc-flooding-protection");
-            options.AddArgument("--disable-renderer-backgrounding");
-            options.AddArgument("--disable-backgrounding-occluded-windows");
             options.AddArgument("--disable-features=TranslateUI");
             options.AddArgument("--disable-ignore-certificate-errors");
-            options.AddArgument("--disable-extensions-file-access-check");
-            options.AddArgument("--disable-extensions-http-throttling");
             options.AddArgument("--disable-features=site-per-process");
             options.AddArgument("--disable-site-isolation-trials");
-            options.AddArgument("--disable-web-security");
-            options.AddArgument("--disable-features=VizDisplayCompositor");
-            options.AddArgument("--disable-features=TranslateUI");
             options.AddArgument("--disable-features=BlinkGenPropertyTrees");
             options.AddArgument("--disable-features=ImprovedCookieControls");
             options.AddArgument("--disable-features=SameSiteByDefaultCookies");
@@ -715,9 +700,6 @@ namespace RegMail
             options.AddUserProfilePreference("profile.default_content_setting_values.app_banner", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.site_engagement", 2);
             options.AddUserProfilePreference("profile.default_content_setting_values.durable_storage", 2);
-
-            Console.WriteLine($"✅ Đã tạo fingerprint mới: {fingerprint.ProfileName} - {fingerprint.UserAgent}");
-            Console.WriteLine($"🌍 Ngôn ngữ: en-US (English US)");
         }
 
         public static void ClearChromeData()

@@ -10,7 +10,8 @@ namespace RegMail
     {
         // Profile cố định cho từng tester
         private static readonly string ProfileName = "qa1"; // Có thể thay đổi thành qa2, qa3, etc.
-        private static readonly string StableProfilePath = Path.Combine(Environment.CurrentDirectory, "chrome_profiles", ProfileName);
+        private static readonly string baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        private static readonly string StableProfilePath = Path.Combine(baseDir, "RegMail", "chrome_profiles", ProfileName);
         
         public static void ConfigureAdvancedChromeOptions(ChromeOptions options, int width, int height, int posX, int posY)
         {
@@ -26,31 +27,17 @@ namespace RegMail
             options.AddArgument("--disable-popup-blocking");
             options.AddArgument("--disable-translate");
             options.AddArgument("--disable-sync");
-            options.AddArgument("--disable-background-networking");
             options.AddArgument("--disable-background-downloads");
-            options.AddArgument("--disable-client-side-phishing-detection");
-            options.AddArgument("--disable-component-update");
-            options.AddArgument("--disable-domain-reliability");
             options.AddArgument("--disable-features=TranslateUI");
             
             // 3. CÁC ARGUMENTS PERFORMANCE (KHÔNG CỰC ĐOAN)
-            options.AddArgument("--disable-background-timer-throttling");
-            options.AddArgument("--disable-backgrounding-occluded-windows");
-            options.AddArgument("--disable-renderer-backgrounding");
             options.AddArgument("--disable-dev-shm-usage");
-            options.AddArgument("--disable-ipc-flooding-protection");
-            options.AddArgument("--disable-hang-monitor");
-            options.AddArgument("--disable-prompt-on-repost");
             
             // 4. CÁC ARGUMENTS SECURITY CƠ BẢN (KHÔNG CỰC ĐOAN)
             options.AddArgument("--no-sandbox");
-            options.AddArgument("--disable-gpu");
-            options.AddArgument("--disable-software-rasterizer");
             
             // 5. CÁC ARGUMENTS NETWORK VÀ CONNECTIVITY
             options.AddArgument("--remote-debugging-port=0");
-            options.AddArgument("--disable-features=VizDisplayCompositor");
-            options.AddArgument("--disable-shared-memory");
             
             // 6. CÁC ARGUMENTS LANGUAGE VÀ LOCALE
             options.AddArgument("--lang=en-US");
@@ -60,16 +47,6 @@ namespace RegMail
             options.AddArgument("--new-window");
             options.AddArgument("--window-size=" + width + "," + height);
             options.AddArgument("--window-position=" + posX + "," + posY);
-            
-            // 8. KHÔNG OVERRIDE USER-AGENT - ĐỂ CHROME TỰ ĐỘNG SỬ DỤNG UA MẶC ĐỊNH
-            
-            // 9. CÁC ARGUMENTS PERFORMANCE BỔ SUNG
-            options.AddArgument("--memory-pressure-off");
-            options.AddArgument("--max_old_space_size=4096");
-            
-            // 10. CÁC ARGUMENTS EXPERIMENTAL FEATURES
-            options.AddArgument("--enable-experimental-web-platform-features");
-            options.AddArgument("--enable-features=NetworkService,NetworkServiceLogging");
         }
 
         // Phương thức đảm bảo profile cố định tồn tại

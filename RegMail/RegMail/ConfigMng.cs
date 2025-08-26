@@ -24,5 +24,11 @@ namespace RegMail
         public static bool Chrome_Enable_Sync => bool.Parse(ConfigurationManager.AppSettings["Chrome_Enable_Sync"]);
         public static bool Chrome_Use_Minimal_Flags => bool.Parse(ConfigurationManager.AppSettings["Chrome_Use_Minimal_Flags"]);
         public static bool Chrome_Headless_Mode => bool.Parse(ConfigurationManager.AppSettings["Chrome_Headless_Mode"]);
+        
+        // Auto Login Configuration
+        public static bool AutoLogin_Enabled => bool.Parse(ConfigurationManager.AppSettings["AutoLogin_Enabled"]);
+        public static string AutoLogin_Default_Email => ConfigurationManager.AppSettings["AutoLogin_Default_Email"];
+        public static string AutoLogin_Default_Password => ConfigurationManager.AppSettings["AutoLogin_Default_Password"];
+        public static bool AutoLogin_Use_Config_If_Empty => bool.Parse(ConfigurationManager.AppSettings["AutoLogin_Use_Config_If_Empty"]);
     }
 }

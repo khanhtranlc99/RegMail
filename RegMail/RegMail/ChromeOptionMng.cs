@@ -27,21 +27,6 @@ namespace RegMail
                 options.AddArgument("--no-sandbox");
                 options.AddArgument("--disable-dev-shm-usage");
             }
-
-            // Cấu hình User-Agent phù hợp với nền tảng
-            if (Environment.OSVersion.Platform == PlatformID.Win32NT)
-            {
-                options.AddArgument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            }
-            else if (Environment.OSVersion.Platform == PlatformID.Unix)
-            {
-                options.AddArgument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            }
-            else if (Environment.OSVersion.Platform == PlatformID.MacOSX)
-            {
-                options.AddArgument("--user-agent=Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-            }
-
             // Cấu hình headless mode nếu cần
             if (ConfigManager.Chrome_Headless_Mode)
             {

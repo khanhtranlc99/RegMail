@@ -1,313 +1,267 @@
-﻿using System;
+﻿using OpenQA.Selenium;
+using OpenQA.Selenium.Chrome;
+using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
-using OpenQA.Selenium.Chrome;
 
 namespace RegMail
 {
-    public class ProxyInfo
-    {
-        public string Host { get; set; }
-        public int Port { get; set; }
-        public string Username { get; set; }
-        public string Password { get; set; }
-        public bool IsAuthenticated => !string.IsNullOrEmpty(Username) && !string.IsNullOrEmpty(Password);
-
-        public override string ToString()
-        {
-            if (IsAuthenticated)
-                return $"{Host}:{Port} (User: {Username})";
-            return $"{Host}:{Port}";
-        }
-    }
-
     public class ProxyManager
     {
-        private List<ProxyInfo> _proxyList;
-        private int _currentIndex = 0;
-        private readonly object _lockObject = new object();
-        private readonly string _proxyFilePath;
-
-        public ProxyManager(string proxyFilePath = "proxies.txt")
+        // ======== Data model ========
+        public sealed class ProxySpec
         {
-            _proxyFilePath = proxyFilePath;
-            _proxyList = new List<ProxyInfo>();
-            LoadProxies();
-        }
+            public string Scheme;   // "http" | "socks5" | "socks4"
+            public string Host;
+            public int Port;
+            public string Username;
+            public string Password;
 
-        public void LoadProxies()
-        {
-            try
+            public bool HasAuth { get { return !string.IsNullOrEmpty(Username); } }
+            public bool IsHttp { get { return string.Equals(Scheme, "http", StringComparison.OrdinalIgnoreCase); } }
+            public bool IsSocks { get { return Scheme != null && Scheme.StartsWith("socks", StringComparison.OrdinalIgnoreCase); } }
+
+            public override string ToString()
             {
-                if (!File.Exists(_proxyFilePath))
-                {
-                    Console.WriteLine($"⚠️ File proxy không tồn tại: {_proxyFilePath}");
-                    Console.WriteLine("📝 Tạo file proxy mẫu...");
-                    CreateSampleProxyFile();
-                    return;
-                }
-
-                _proxyList.Clear();
-                string[] lines = File.ReadAllLines(_proxyFilePath);
-
-                foreach (string line in lines)
-                {
-                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#"))
-                        continue;
-
-                    ProxyInfo proxy = ParseProxyLine(line);
-                    if (proxy != null)
-                    {
-                        _proxyList.Add(proxy);
-                    }
-                }
-
-                Console.WriteLine($"✅ Đã tải {_proxyList.Count} proxy từ file {_proxyFilePath}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Lỗi khi tải file proxy: {ex.Message}");
+                return Scheme + "://" + Host + ":" + Port + (HasAuth ? (" (auth:" + Username + ")") : "");
             }
         }
 
-        private ProxyInfo ParseProxyLine(string line)
+        public static List<ProxySpec> LoadProxiesFromFile(string path)
         {
-            try
-            {
-                // Format: host:port hoặc host:port:username:password
-                string[] parts = line.Trim().Split(':');
+            if (string.IsNullOrWhiteSpace(path)) throw new ArgumentException("Đường dẫn file rỗng.");
+            if (!File.Exists(path)) throw new FileNotFoundException("Không tìm thấy file proxy.", path);
 
-                if (parts.Length < 2)
+            var list = new List<ProxySpec>();
+            foreach (var raw in File.ReadLines(path))
+            {
+                var line = (raw ?? "").Trim();
+                if (line.Length == 0) continue;
+                if (line.StartsWith("#") || line.StartsWith("//")) continue;
+
+                try
                 {
-                    Console.WriteLine($"⚠️ Dòng proxy không hợp lệ: {line}");
-                    return null;
+                    var spec = ParseLine(line);
+                    if (spec != null) list.Add(spec);
                 }
-
-                if (!int.TryParse(parts[1], out int port))
+                catch
                 {
-                    Console.WriteLine($"⚠️ Port không hợp lệ: {parts[1]}");
-                    return null;
+                    // Có thể log warning ở đây nếu cần
                 }
-
-                var proxy = new ProxyInfo
-                {
-                    Host = parts[0],
-                    Port = port
-                };
-
-                // Nếu có username và password
-                if (parts.Length >= 4)
-                {
-                    proxy.Username = parts[2];
-                    proxy.Password = parts[3];
-                }
-
-                return proxy;
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Lỗi parse proxy line '{line}': {ex.Message}");
-                return null;
-            }
+            return list;
         }
-
-        private void CreateSampleProxyFile()
+        public static ProxySpec PickRandom(IReadOnlyList<ProxySpec> all, Random rng = null)
         {
-            try
-            {
-                string sampleContent = @"# File cấu hình proxy cho RegMail
-# Format: host:port hoặc host:port:username:password
-# Mỗi dòng một proxy, dòng bắt đầu bằng # là comment
-
-# Ví dụ proxy không cần xác thực:
-# 192.168.1.100:8080
-
-# Ví dụ proxy cần xác thực:
-# 192.168.1.100:8080:username:password
-
-# Thêm proxy của bạn vào đây:
-";
-
-                File.WriteAllText(_proxyFilePath, sampleContent);
-                Console.WriteLine($"✅ Đã tạo file proxy mẫu: {_proxyFilePath}");
-                Console.WriteLine("📝 Vui lòng thêm proxy vào file và chạy lại chương trình");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Không thể tạo file proxy mẫu: {ex.Message}");
-            }
+            if (all == null || all.Count == 0) throw new InvalidOperationException("Danh sách proxy trống.");
+            if (rng == null) rng = new Random();
+            int idx = rng.Next(all.Count);
+            return all[idx];
         }
-
-        public ProxyInfo GetNextProxy()
+        public static async Task<ProxySpec> PickRandomWorkingHttpFromFileAsync(string path, int timeoutSeconds = 8, int maxToTry = 20)
         {
-            lock (_lockObject)
+            var all = LoadProxiesFromFile(path).Where(p => p.IsHttp).ToList();
+            if (all.Count == 0) throw new InvalidOperationException("File không có HTTP proxy nào.");
+
+            Shuffle(all);
+            if (maxToTry > 0) all = all.Take(maxToTry).ToList();
+
+            foreach (var p in all)
             {
-                if (_proxyList.Count == 0)
+                bool ok = await TestHttpProxyAsync(p, timeoutSeconds);
+                if (ok) return p;
+            }
+            throw new InvalidOperationException("Không tìm thấy HTTP proxy còn hoạt động.");
+        }
+        public static void ApplyToChrome(ChromeOptions options, ProxySpec p, bool headless = false)
+        {
+            if (options == null) throw new ArgumentNullException(nameof(options));
+            if (p == null) throw new ArgumentNullException(nameof(p));
+
+            if (p.IsSocks && p.HasAuth)
+                throw new NotSupportedException("SOCKS proxy có username/password không được Chrome hỗ trợ trực tiếp. Hãy dùng HTTP proxy hoặc forwarder HTTP→SOCKS5.");
+
+            options.AddArgument("--proxy-bypass-list=localhost,127.0.0.1");
+            options.AddArgument($"--proxy-server={p.Scheme}://{p.Host}:{p.Port}");
+
+            if (p.IsHttp && p.HasAuth)
+            {
+                if (headless)
                 {
-                    Console.WriteLine("⚠️ Không có proxy nào khả dụng");
-                    return null;
-                }
-
-                var proxy = _proxyList[_currentIndex];
-                _currentIndex = (_currentIndex + 1) % _proxyList.Count;
-
-                Console.WriteLine($"🔄 Sử dụng proxy: {proxy}");
-                return proxy;
-            }
-        }
-
-        public ProxyInfo GetRandomProxy()
-        {
-            lock (_lockObject)
-            {
-                if (_proxyList.Count == 0)
-                {
-                    Console.WriteLine("⚠️ Không có proxy nào khả dụng");
-                    return null;
-                }
-
-                Random random = new Random();
-                int index = random.Next(_proxyList.Count);
-                var proxy = _proxyList[index];
-
-                Console.WriteLine($"🎲 Sử dụng proxy ngẫu nhiên: {proxy}");
-                return proxy;
-            }
-        }
-
-        public void ConfigureChromeOptions(ChromeOptions options, ProxyInfo proxy)
-        {
-            if (proxy == null)
-            {
-                Console.WriteLine("⚠️ Không có proxy để cấu hình");
-                return;
-            }
-
-            try
-            {
-                // Cấu hình proxy cho Chrome
-                string proxyString = proxy.IsAuthenticated
-                    ? $"{proxy.Host}:{proxy.Port}:{proxy.Username}:{proxy.Password}"
-                    : $"{proxy.Host}:{proxy.Port}";
-
-                options.AddArgument($"--proxy-server={proxyString}");
-
-                // Thêm các argument để tránh phát hiện automation
-                options.AddArgument("--disable-blink-features=AutomationControlled");
-                options.AddExcludedArgument("enable-automation");
-                options.AddArgument("--disable-web-security");
-                options.AddArgument("--allow-running-insecure-content");
-                options.AddArgument("--disable-features=VizDisplayCompositor");
-
-                // Cấu hình user agent để tránh phát hiện
-                options.AddArgument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
-
-                Console.WriteLine($"✅ Đã cấu hình proxy cho Chrome: {proxy}");
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"❌ Lỗi cấu hình proxy cho Chrome: {ex.Message}");
-            }
-        }
-
-        public async Task<bool> TestProxy(ProxyInfo proxy)
-        {
-            if (proxy == null) return false;
-
-            try
-            {
-                var handler = new HttpClientHandler();
-
-                if (proxy.IsAuthenticated)
-                {
-                    var credentials = new NetworkCredential(proxy.Username, proxy.Password);
-                    handler.Proxy = new WebProxy(proxy.Host, proxy.Port)
-                    {
-                        Credentials = credentials
-                    };
+                    Console.WriteLine("⚠️ Headless + HTTP proxy có auth: extension không chạy → khả năng bị 407. Cân nhắc chạy non-headless hoặc dùng forwarder.");
                 }
                 else
                 {
-                    handler.Proxy = new WebProxy(proxy.Host, proxy.Port);
-                }
-
-                using (var client = new HttpClient(handler))
-                {
-                    client.Timeout = TimeSpan.FromSeconds(10);
-
-                    // Test với Google để kiểm tra proxy
-                    var response = await client.GetAsync("https://www.google.com");
-                    bool isSuccess = response.IsSuccessStatusCode;
-
-                    Console.WriteLine($"🔍 Test proxy {proxy}: {(isSuccess ? "✅ Thành công" : "❌ Thất bại")}");
-                    return isSuccess;
+                    string extZip = BuildAutoAuthExtensionZip(p.Username, p.Password);
+                    options.AddExtension(extZip);
                 }
             }
-            catch (Exception ex)
+            Console.WriteLine($"✅ Applied proxy: {p}");
+        }
+        private static ProxySpec ParseLine(string line)
+        {
+            if (line.IndexOf("://", StringComparison.Ordinal) >= 0)
             {
-                Console.WriteLine($"❌ Lỗi test proxy {proxy}: {ex.Message}");
+                string s = NormalizeSchemes(line);
+
+                Uri uri;
+                if (!Uri.TryCreate(s, UriKind.Absolute, out uri))
+                    throw new ArgumentException("URL proxy không hợp lệ: " + line);
+
+                if (uri.Port <= 0 || uri.Port > 65535)
+                    throw new ArgumentException("Port không hợp lệ: " + line);
+
+                string scheme = uri.Scheme.ToLowerInvariant();
+                EnsureChromeSupportedScheme(scheme);
+
+                var spec = new ProxySpec();
+                spec.Scheme = scheme;
+                spec.Host = uri.Host;
+                spec.Port = uri.Port;
+
+                if (!string.IsNullOrEmpty(uri.UserInfo))
+                {
+                    var parts = uri.UserInfo.Split(new[] { ':' }, 2);
+                    spec.Username = Uri.UnescapeDataString(parts[0]);
+                    spec.Password = parts.Length > 1 ? Uri.UnescapeDataString(parts[1]) : "";
+                }
+                return spec;
+            }
+            else
+            {
+                // "ip:port" hoặc "ip:port:user:pass"
+                var parts = line.Split(':');
+                if (parts.Length == 2)
+                {
+                    int port;
+                    if (!int.TryParse(parts[1], out port) || port <= 0 || port > 65535)
+                        throw new ArgumentException("Port không hợp lệ: " + line);
+
+                    var spec = new ProxySpec();
+                    spec.Scheme = "http";
+                    spec.Host = parts[0];
+                    spec.Port = port;
+                    return spec;
+                }
+                else if (parts.Length == 4)
+                {
+                    int port;
+                    if (!int.TryParse(parts[1], out port) || port <= 0 || port > 65535)
+                        throw new ArgumentException("Port không hợp lệ: " + line);
+
+                    var spec = new ProxySpec();
+                    spec.Scheme = "http"; // mặc định http
+                    spec.Host = parts[0];
+                    spec.Port = port;
+                    spec.Username = parts[2];
+                    spec.Password = parts[3];
+                    return spec;
+                }
+            }
+            throw new ArgumentException("Dòng proxy không đúng định dạng: " + line);
+        }
+        private static string NormalizeSchemes(string s)
+        {
+            // C# 7.3 không có Replace(String, String, StringComparison). Làm thủ công:
+            s = ReplaceInsensitive(s, "https://", "http://");
+            s = ReplaceInsensitive(s, "socks5h://", "socks5://");
+            s = ReplaceInsensitive(s, "socks4a://", "socks4://");
+            return s;
+        }
+
+        private static void EnsureChromeSupportedScheme(string scheme)
+        {
+            if (scheme == "https") throw new NotSupportedException("Chrome không nhận https:// cho --proxy-server; dùng http://host:port.");
+            if (scheme != "http" && scheme != "socks5" && scheme != "socks4")
+                throw new NotSupportedException($"Chrome không hỗ trợ scheme '{scheme}'. Chỉ hỗ trợ http, socks4, socks5.");
+        }
+        private static string ReplaceInsensitive(string input, string search, string replacement)
+        {
+            if (string.IsNullOrEmpty(input) || string.IsNullOrEmpty(search)) return input;
+            var sb = new StringBuilder();
+            int pos = 0;
+            int idx;
+            while ((idx = input.IndexOf(search, pos, StringComparison.OrdinalIgnoreCase)) >= 0)
+            {
+                sb.Append(input, pos, idx - pos);
+                sb.Append(replacement);
+                pos = idx + search.Length;
+            }
+            sb.Append(input, pos, input.Length - pos);
+            return sb.ToString();
+        }
+        private static void Shuffle<T>(IList<T> list)
+        {
+            var rng = new Random();
+            for (int i = list.Count - 1; i > 0; i--)
+            {
+                int j = rng.Next(i + 1);
+                (list[i], list[j]) = (list[j], list[i]);
+            }
+        }
+        public static async Task<bool> TestHttpProxyAsync(ProxySpec p, int timeoutSeconds)
+        {
+            if (p == null || !p.IsHttp) return false;
+
+            // Cho dev/test: bỏ kiểm tra SSL (tùy bạn có thể bỏ dòng này)
+            ServicePointManager.ServerCertificateValidationCallback = delegate { return true; };
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12 | SecurityProtocolType.Tls11 | SecurityProtocolType.Tls;
+
+            var handler = new HttpClientHandler();
+            handler.Proxy = new WebProxy(p.Host, p.Port);
+            if (p.HasAuth) handler.Proxy.Credentials = new NetworkCredential(p.Username, p.Password);
+            handler.UseProxy = true;
+
+            var http = new HttpClient(handler);
+            http.Timeout = TimeSpan.FromSeconds(timeoutSeconds);
+
+            try
+            {
+                var resp = await http.GetAsync("https://httpbin.org/ip").ConfigureAwait(false);
+                return ((int)resp.StatusCode >= 200) && ((int)resp.StatusCode < 300);
+            }
+            catch
+            {
                 return false;
             }
-        }
-
-        public async Task<List<ProxyInfo>> TestAllProxies()
-        {
-            var workingProxies = new List<ProxyInfo>();
-
-            Console.WriteLine($"🔍 Bắt đầu test {_proxyList.Count} proxy...");
-
-            foreach (var proxy in _proxyList)
+            finally
             {
-                bool isWorking = await TestProxy(proxy);
-                if (isWorking)
-                {
-                    workingProxies.Add(proxy);
-                }
+                http.Dispose();
             }
-
-            Console.WriteLine($"✅ Tìm thấy {workingProxies.Count}/{_proxyList.Count} proxy hoạt động");
-            return workingProxies;
         }
-
-        public void AddProxy(string host, int port, string username = null, string password = null)
+        public static string BuildAutoAuthExtensionZip(string username, string password)
         {
-            var proxy = new ProxyInfo
-            {
-                Host = host,
-                Port = port,
-                Username = username,
-                Password = password
-            };
+            string dir = Path.Combine(Path.GetTempPath(), "AutoAuth_" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(dir);
 
-            lock (_lockObject)
-            {
-                _proxyList.Add(proxy);
-            }
+            File.WriteAllText(Path.Combine(dir, "manifest.json"), @"{
+  ""version"": ""1.0.0"",
+  ""manifest_version"": 2,
+  ""name"": ""AutoAuth Proxy"",
+  ""permissions"": [""webRequest"", ""webRequestBlocking"", ""<all_urls>""],
+  ""background"": { ""scripts"": [""background.js""] }
+}");
+            string bg = $@"chrome.webRequest.onAuthRequired.addListener(
+  function (details) {{
+    return {{ authCredentials: {{ username: ""{EscapeJs(username)}"", password: ""{EscapeJs(password)}"" }} }};
+  }},
+  {{ urls: [""<all_urls>""] }},
+  ['blocking']
+);";
+            File.WriteAllText(Path.Combine(dir, "background.js"), bg);
 
-            Console.WriteLine($"✅ Đã thêm proxy: {proxy}");
+            string zip = Path.Combine(Path.GetTempPath(), "AutoAuth_" + Guid.NewGuid().ToString("N") + ".zip");
+            ZipFile.CreateFromDirectory(dir, zip);
+            return zip;
         }
 
-        public void RemoveProxy(ProxyInfo proxy)
-        {
-            lock (_lockObject)
-            {
-                _proxyList.Remove(proxy);
-            }
-
-            Console.WriteLine($"🗑️ Đã xóa proxy: {proxy}");
-        }
-
-        public int GetProxyCount()
-        {
-            return _proxyList.Count;
-        }
-
-        public List<ProxyInfo> GetAllProxies()
-        {
-            return new List<ProxyInfo>(_proxyList);
-        }
+        private static string EscapeJs(string s) =>
+            (s ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\n", "\\n").Replace("\r", "\\r");
     }
 }
