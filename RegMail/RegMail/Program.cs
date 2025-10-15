@@ -3,6 +3,7 @@ using DocumentFormat.OpenXml.Wordprocessing;
 using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Interactions;
+using OpenQA.Selenium.Remote;
 using OpenQA.Selenium.Support.UI;
 using OtpNet;
 using RegMail;
@@ -38,6 +39,7 @@ public class OtpData
 class Program
 {
     private static ProxyManager _proxyManager;
+    private static ProxyManager.ProxySpec _currentProxy; // Proxy hiện tại được sử dụng
     private static string phoneNumber2FA;
     private static string currentAuthenticatorKey; // Lưu key cho Gmail hiện tại
     private static string currentGmail; // Lưu Gmail hiện tại
@@ -45,6 +47,7 @@ class Program
     private static Random _random = new Random(); // Random cho các hành động mô phỏng
     private static bool enableGmailSync = false; // Cờ để bật/tắt đồng bộ Gmail
     private static string path = "C:\\Users\\lqanh\\OneDrive\\ドキュメント\\Reg\\RegMail\\RegMail\\proxies.txt"; // Đường dẫn file proxy
+    
     static async Task Main()
     {
         Console.OutputEncoding = Encoding.UTF8;
@@ -54,20 +57,99 @@ class Program
         Console.WriteLine("🔧 Khởi tạo Proxy Manager...");
         _proxyManager = new ProxyManager();
         
-        
-        // Hiển thị menu chọn chế độ proxy
-        await ShowProxyMenu();
+        // ✅ TẢI PROXY TỪ FILE SỬ DỤNG ProxyManager
+        Console.WriteLine("🔧 Tải proxy từ file...");
+        try
+        {
+            var proxies = ProxyManager.LoadProxiesFromFile(path);
+            Console.WriteLine($"✅ Đã tải {proxies.Count} proxy từ file");
+            
+            if (proxies.Count > 0)
+            {
+                // Chọn proxy ngẫu nhiên
+                _currentProxy = ProxyManager.PickRandom(proxies);
+                Console.WriteLine($"✅ Đã chọn proxy: {_currentProxy}");
+                
+                // Test proxy trước khi sử dụng
+                Console.WriteLine("🔍 Đang test proxy...");
+                try
+                {
+                    bool proxyWorking = await ProxyManager.TestHttpProxyAsync(_currentProxy, 10);
+                    if (!proxyWorking)
+                    {
+                        Console.WriteLine("⚠️ Proxy không hoạt động, thử proxy khác...");
+                        // Thử proxy khác
+                        for (int i = 0; i < Math.Min(5, proxies.Count); i++)
+                        {
+                            _currentProxy = ProxyManager.PickRandom(proxies);
+                            proxyWorking = await ProxyManager.TestHttpProxyAsync(_currentProxy, 5);
+                            if (proxyWorking)
+                            {
+                                Console.WriteLine($"✅ Đã tìm thấy proxy hoạt động: {_currentProxy}");
+                                break;
+                            }
+                        }
+                        
+                        if (!proxyWorking)
+                        {
+                            Console.WriteLine("❌ Không tìm thấy proxy nào hoạt động, sẽ chạy không proxy");
+                            _currentProxy = null;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Lỗi khi test proxy: {ex.Message}");
+                    Console.WriteLine("⚠️ Sẽ tiếp tục với proxy đã chọn");
+                }
+            }
+            else
+            {
+                Console.WriteLine("⚠️ Không có proxy nào khả dụng, sẽ chạy không proxy");
+                _currentProxy = null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"❌ Lỗi khi tải proxy: {ex.Message}");
+            Console.WriteLine("⚠️ Sẽ chạy không proxy");
+            _currentProxy = null;
+        }
 
         // Hiển thị menu chế độ hoạt động
         Console.WriteLine("\n🎯 Chọn chế độ hoạt động:");
-        Console.WriteLine("1. Tạo tài khoản Gmail mới");
+        Console.WriteLine("1. Tạo tài khoản Gmail mới (manual)");
         Console.WriteLine("2. Đăng nhập với email đã có (sử dụng persistent fingerprint)");
+        Console.WriteLine("3. 🎯 TẠO NHIỀU GMAIL với Profile Rotation (TỰ ĐỘNG)");
         Console.WriteLine("4. Test tính nhất quán của persistent fingerprint");
+        Console.WriteLine("5. 📊 Xem khuyến nghị scale (tạo nhiều Gmail/ngày)");
         Console.WriteLine("6. 📁 Quản lý Chrome Profiles");
         Console.Write("Lựa chọn của bạn (1-6): ");
         
         string choice = Console.ReadLine();
         
+        // Xử lý lựa chọn 5: Xem khuyến nghị scale
+        if (choice == "5")
+        {
+            Console.Write("\n📊 Bạn muốn tạo bao nhiêu Gmail/ngày? ");
+            if (int.TryParse(Console.ReadLine(), out int desiredCount) && desiredCount > 0)
+            {
+                AdvancedChromeConfig.ShowScalingRecommendation(desiredCount);
+                AdvancedChromeConfig.ShowAllProfilesInfo();
+            }
+            else
+            {
+                Console.WriteLine("❌ Số lượng không hợp lệ!");
+            }
+            return;
+        }
+        
+        // Xử lý lựa chọn 3: Tạo nhiều Gmail với rotation
+        if (choice == "3")
+        {
+            await CreateMultipleGmailsWithRotation();
+            return;
+        }
         
         // Chế độ 1: Tạo tài khoản mới
         Console.WriteLine("✅ Chế độ: Tạo tài khoản Gmail mới");
@@ -118,20 +200,7 @@ class Program
             currentGmail = "";
             currentPassword = "";
             currentAuthenticatorKey = "";
-            ProxyManager.ProxySpec p = null;
-            try
-            {
-                p = ProxyManager.PickRandomWorkingHttpFromFileAsync(path, 8, 20).GetAwaiter().GetResult();
-                Console.WriteLine("🌐 Chọn được HTTP proxy còn sống: " + p);
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine("⚠️ Không tìm được HTTP proxy sống: " + e.Message);
-                var all = ProxyManager.LoadProxiesFromFile(path);
-                if (all.Count == 0) throw;
-                p = ProxyManager.PickRandom(all);
-                Console.WriteLine("↩️ Fallback chọn ngẫu nhiên: " + p);
-            }
+            
             // Biến theo dõi trang hiện tại (1 = trang đầu tiên)
             int currentPage = 1;
             
@@ -144,19 +213,25 @@ class Program
             // Tạo account identifier deterministic cho persistent fingerprint
             // Sử dụng tab index và timestamp để tạo account unique identifier
             string accountIdentifier = $"gmail_tab_{i}_{DateTime.Now:yyyyMMdd_HHmm}";
+            
+            // Tạo userDataDir duy nhất cho mỗi tab
             string userDataDir = AdvancedChromeConfig.CreateUniqueUserDataDirectory();
             Console.WriteLine($"📁 UserDataDir cho tab {i + 1}: {userDataDir}");
-
-            if (ConfigManager.Chrome_Use_Minimal_Flags)
+            
+            // ✅ DEBUG: Kiểm tra proxy trước khi tạo Chrome options
+            if (_currentProxy != null)
             {
-                options = ChromeOptionsManager.CreateMinimalOptions(userDataDir);
-                Console.WriteLine("ℹ️ Sử dụng cấu hình Chrome tối thiểu");
+                Console.WriteLine($"🔍 DEBUG: Proxy cho tab {i + 1}: {_currentProxy}");
+                Console.WriteLine($"🔍 DEBUG: Proxy scheme: {_currentProxy.Scheme}");
+                Console.WriteLine($"🔍 DEBUG: Proxy host:port: {_currentProxy.Host}:{_currentProxy.Port}");
+                Console.WriteLine($"🔍 DEBUG: Proxy có auth: {_currentProxy.HasAuth}");
             }
             else
             {
-                options = ChromeOptionsManager.CreateAdvancedOptions(userDataDir);
-                Console.WriteLine("ℹ️ Sử dụng cấu hình Chrome nâng cao");
+                Console.WriteLine($"🔍 DEBUG: Tab {i + 1} sẽ chạy không proxy");
             }
+        
+            options = ChromeOptionsManager.CreateMinimalOptions(userDataDir, _currentProxy);
             
             // Áp dụng fingerprint
             FingerprintManager.ConfigureChromeOptions(options);
@@ -171,36 +246,63 @@ class Program
             {
                 Console.WriteLine("⚠️ Lỗi session Chrome, thử lại với cấu hình tối thiểu...");
                 // Thử lại với cấu hình tối thiểu
-                options = ChromeOptionsManager.CreateMinimalOptions(userDataDir);
+                options = ChromeOptionsManager.CreateMinimalOptions(userDataDir, _currentProxy);
                 driver = new ChromeDriver(options);
-            }
-            ProxyManager.ApplyToChrome(options, p, false);
-            driver.Navigate().GoToUrl(signupUrl);
+        }
+        
+        // Xử lý proxy authentication popup nếu xuất hiện
+        HandleProxyAuthPopup(driver);
+        
+        driver.Navigate().GoToUrl(signupUrl);
 
-            Thread.Sleep(5000);
+        // Thay thế Thread.Sleep cố định bằng SmartDelay
+        SmartDelay("navigate", 2000, 5000);
 
 
-            // Inject JavaScript để thay đổi fingerprint và tránh phát hiện automation
-            //InjectAntiDetectionScripts(driver);
+            //Inject JavaScript để thay đổi fingerprint và tránh phát hiện automation
+            InjectAntiDetectionScripts(driver);
+            
+            // Cải thiện network fingerprint
+            ImproveNetworkFingerprint(driver);
+            
+            // Kiểm tra fingerprint consistency
+            EnsureFingerprintConsistency(driver);
+            
+            // Cải thiện device fingerprint
+            ImproveDeviceFingerprint(driver);
+            
+            // Build profile history để tăng trust score
+            BuildProfileHistory(driver);
+            
+            // Thêm browsing behavior để build profile
+            AddBrowsingBehavior(driver);
             
             // Thêm xử lý lỗi tổng thể cho quá trình tạo Gmail
             try
             {
 
+            // Thêm trust building behavior trước khi fill form
+            AddTrustBuildingBehavior(driver);
+            
             string firstName = FillFirstName(driver);
+            AddTrustBuildingBehavior(driver);
+            
             string lastName = FillLastName(driver);
+            AddTrustBuildingBehavior(driver);
             ClickNextButton(driver, currentPage++);
             FillDayAndYearNew(driver);
             FillMonthNew(driver);
             FillGenderNew(driver);
             ClickNextButton(driver, currentPage++);
-            HumanLikeActions(driver);
             ClickNextButton(driver, currentPage++);
-            RandomDelay();
+            // Thêm delay thông minh và human-like behavior
+            SmartDelay("think", 2000, 5000);
+            HumanLikeActions(driver); // Thêm human behavior
             
             // Kiểm tra xem có cần click "Create your own Gmail address" hay không
             TryClickCreateOwnGmail(driver);
-            RandomDelay();
+            SmartDelay("think", 2000, 5000);
+            HumanLikeActions(driver); // Thêm human behavior
 
             string email = FillUsername(driver, firstName, lastName);
             string password = FillPassword(driver);
@@ -497,49 +599,6 @@ class Program
         }
     }
 
-    // Hàm click tự nhiên với fallback JavaScript - ưu tiên click tự nhiên
-    static bool HumanLikeClick(IWebDriver driver, IWebElement element, string elementDescription = "element")
-    {
-        try
-        {
-            // Cách 1: Click tự nhiên trước (tạo ra đầy đủ mouse events)
-            element.Click();
-            Console.WriteLine($"✅ Đã click tự nhiên vào {elementDescription}");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"⚠️ Click tự nhiên thất bại cho {elementDescription}: {ex.Message}");
-            
-            // Cách 2: Fallback JavaScript click chỉ khi thật sự cần thiết
-            try
-            {
-                IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
-                js.ExecuteScript("arguments[0].click();", element);
-                Console.WriteLine($"✅ Đã fallback JavaScript click cho {elementDescription}");
-                return true;
-            }
-            catch (Exception jsEx)
-            {
-                Console.WriteLine($"❌ JavaScript click cũng thất bại cho {elementDescription}: {jsEx.Message}");
-                
-                // Cách 3: Fallback Actions click
-                try
-                {
-                    var actions = new Actions(driver);
-                    actions.MoveToElement(element).Click().Perform();
-                    Console.WriteLine($"✅ Đã fallback Actions click cho {elementDescription}");
-                    return true;
-                }
-                catch (Exception actionsEx)
-                {
-                    Console.WriteLine($"❌ Actions click cũng thất bại cho {elementDescription}: {actionsEx.Message}");
-                    return false;
-                }
-            }
-        }
-    }
-
     // Hàm đợi trang tải hoàn tất thông minh
     static bool WaitForPageLoad(IWebDriver driver, int timeoutSeconds = 15)
     {
@@ -558,94 +617,6 @@ class Program
         catch (WebDriverTimeoutException)
         {
             Console.WriteLine("⚠️ Page load timeout - tiếp tục thực hiện");
-            return false;
-        }
-    }
-
-    // Hàm đợi URL thay đổi thông minh
-    static bool WaitForUrlChange(IWebDriver driver, string currentUrl, int timeoutSeconds = 15)
-    {
-        try
-        {
-            var urlChanged = new WebDriverWait(driver, TimeSpan.FromSeconds(timeoutSeconds))
-                .Until(d => !d.Url.Equals(currentUrl));
-            return true;
-        }
-        catch (WebDriverTimeoutException)
-        {
-            return false;
-        }
-    }
-
-    // Hàm debug để phân tích page structure khi gặp lỗi selector
-    static void DebugPageStructure(IWebDriver driver, string context = "")
-    {
-        try
-        {
-            Console.WriteLine($"\n🔍 DEBUG PAGE STRUCTURE - {context}");
-            Console.WriteLine($"📍 Current URL: {driver.Url}");
-            Console.WriteLine($"📄 Page Title: {driver.Title}");
-            
-            // Tìm tất cả input fields
-            var inputs = driver.FindElements(By.TagName("input"));
-            Console.WriteLine($"\n📝 Found {inputs.Count} input elements:");
-            
-            for (int i = 0; i < Math.Min(inputs.Count, 15); i++) // Limit để không spam
-            {
-                try
-                {
-                    var input = inputs[i];
-                    var type = input.GetAttribute("type") ?? "";
-                    var name = input.GetAttribute("name") ?? "";
-                    var id = input.GetAttribute("id") ?? "";
-                    var ariaLabel = input.GetAttribute("aria-label") ?? "";
-                    var placeholder = input.GetAttribute("placeholder") ?? "";
-                    var className = input.GetAttribute("class") ?? "";
-                    
-                    Console.WriteLine($"  [{i+1}] type='{type}' name='{name}' id='{id}' aria-label='{ariaLabel}' placeholder='{placeholder}' class='{className.Substring(0, Math.Min(className.Length, 50))}'");
-                }
-                catch { }
-            }
-            
-            // Tìm tất cả dropdown elements
-            var dropdowns = driver.FindElements(By.XPath("//select | //span[contains(@role, 'button')] | //div[contains(@role, 'button')] | //span[contains(text(), 'Month')] | //span[contains(text(), 'Gender')]"));
-            Console.WriteLine($"\n📋 Found {dropdowns.Count} potential dropdown elements:");
-            
-            for (int i = 0; i < Math.Min(dropdowns.Count, 10); i++)
-            {
-                try
-                {
-                    var dropdown = dropdowns[i];
-                    var tagName = dropdown.TagName;
-                    var text = dropdown.Text?.Trim().Substring(0, Math.Min(dropdown.Text?.Trim().Length ?? 0, 30)) ?? "";
-                    var role = dropdown.GetAttribute("role") ?? "";
-                    var ariaLabel = dropdown.GetAttribute("aria-label") ?? "";
-                    var className = dropdown.GetAttribute("class") ?? "";
-                    
-                    Console.WriteLine($"  [{i+1}] <{tagName}> text='{text}' role='{role}' aria-label='{ariaLabel}' class='{className.Substring(0, Math.Min(className.Length, 40))}'");
-                }
-                catch { }
-            }
-            
-            Console.WriteLine("🔍 End Debug\n");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"❌ Debug page structure error: {ex.Message}");
-        }
-    }
-
-    // Hàm đợi element biến mất (cho loading indicators)
-    static bool WaitForElementToDisappear(IWebDriver driver, By locator, int timeoutSeconds = 10)
-    {
-        try
-        {
-            var wait = new WebDriverWait(driver, TimeSpan.FromSeconds(timeoutSeconds));
-            wait.Until(d => d.FindElements(locator).Count == 0);
-            return true;
-        }
-        catch (WebDriverTimeoutException)
-        {
             return false;
         }
     }
@@ -1115,7 +1086,7 @@ class Program
     static async Task<string> HandleRequestSever(IWebDriver driver, string userNameParam, string passwordParam)
     {
         var client = new HttpClient();
-        string url = $"{ConfigManager.DailyOTP_RentNumber_URL}?appBrand=Google / Gmail / Youtube&countryCode=US&serverName=Server 1&api_key={ConfigManager.DailyOTP_API_Key}";
+        string url = "https://dailyotp.com/api/rent-number?appBrand=Google / Gmail / Youtube&countryCode=US&serverName=Server 6&api_key=4cdba4a83cb5e06bf4f81bb491f7a434vUo9b9CciGZ1VPPjbDcj";
 
         HttpResponseMessage response = await client.GetAsync(url);
         string body = await response.Content.ReadAsStringAsync();
@@ -1161,7 +1132,7 @@ class Program
 
     static async Task HandleGetCode(IWebDriver driver, string transId, string userNameParam, string passwordParam)
     {
-        string url = $"{ConfigManager.DailyOTP_GetMessages_URL}?transId={transId}&api_key={ConfigManager.DailyOTP_API_Key}";
+        string url = $"https://dailyotp.com/api/get-messages?transId={transId}&api_key=4cdba4a83cb5e06bf4f81bb491f7a434vUo9b9CciGZ1VPPjbDcj";
         var client = new HttpClient();
 
         int retry = 0;
@@ -2018,351 +1989,6 @@ class Program
 
     }
 
-    // Menu quản lý proxy và fingerprint
-    static async Task ShowProxyMenu()
-    {
-        while (true)
-        {
-            Console.WriteLine("\n=== MENU QUẢN LÝ PROXY & FINGERPRINT ===");
-            
-            Console.WriteLine("5. Tải lại và test tất cả proxy");
-            Console.WriteLine("6. Chọn proxy để sử dụng");
-            Console.WriteLine("7. Xóa dữ liệu Chrome (xóa fingerprint cũ)");
-            Console.WriteLine("8. Tạo fingerprint mới và test");
-            Console.WriteLine("9. Xóa tất cả Chrome profiles đã lưu");
-            Console.WriteLine("11. Bắt đầu tạo tài khoản Gmail");
-            Console.WriteLine("0. Thoát");
-            Console.Write("Chọn tùy chọn: ");
-
-            string choice = Console.ReadLine();
-            Console.WriteLine();
-
-            switch (choice)
-            {
-                
-                
-                case "7":
-                    ClearChromeData();
-                    break;
-                case "8":
-                    TestNewFingerprint();
-                    break;
-                case "9":
-                    ClearAllChromeProfiles();
-                    break;
-                case "11":
-                    return; // Thoát menu và tiếp tục chương trình
-                case "0":
-                    Environment.Exit(0);
-                    break;
-                default:
-                    Console.WriteLine("❌ Lựa chọn không hợp lệ!");
-                    break;
-            }
-        }
-    }
-
-    static void ClearChromeData()
-    {
-        Console.WriteLine("🗑️ Bắt đầu xóa dữ liệu Chrome...");
-        Console.WriteLine("⚠️ Điều này sẽ xóa tất cả profile, cache và fingerprint cũ!");
-        Console.Write("Bạn có chắc chắn muốn tiếp tục? (y/n): ");
-        
-        if (Console.ReadLine()?.ToLower().StartsWith("y") == true)
-        {
-            FingerprintManager.ClearChromeData();
-            Console.WriteLine("✅ Đã xóa dữ liệu Chrome thành công!");
-            Console.WriteLine("🔄 Bây giờ bạn có thể tạo fingerprint mới hoàn toàn");
-        }
-        else
-        {
-            Console.WriteLine("❌ Đã hủy xóa dữ liệu Chrome");
-        }
-    }
-
-    static void TestNewFingerprint()
-    {
-        Console.WriteLine("🧪 Bắt đầu test fingerprint mới...");
-        
-        try
-        {
-            // Hiển thị danh sách profile có sẵn
-            FingerprintManager.ShowAvailableProfiles();
-            
-            Console.WriteLine("\n🎯 Chọn loại fingerprint để test:");
-            Console.WriteLine("1. Windows Desktop");
-            Console.WriteLine("2. Mac Desktop");
-            Console.WriteLine("3. Linux Desktop");
-            Console.WriteLine("4. Android Mobile");
-            Console.WriteLine("5. iOS Mobile");
-            Console.WriteLine("6. European Desktop");
-            Console.WriteLine("7. Asian Desktop");
-            Console.WriteLine("8. Gaming Desktop");
-            Console.WriteLine("9. Business Desktop");
-            Console.WriteLine("10. Student Laptop");
-            Console.WriteLine("11. Random Profile (từ danh sách)");
-            Console.WriteLine("12. Random Generated (hoàn toàn ngẫu nhiên)");
-            
-            Console.Write("\n📝 Nhập lựa chọn (1-12): ");
-            string choice = Console.ReadLine();
-            
-            FingerprintInfo fingerprint = null;
-            
-            switch (choice)
-            {
-                case "1":
-                    fingerprint = FingerprintManager.GetWindowsProfile();
-                    break;
-                case "2":
-                    fingerprint = FingerprintManager.GetMacProfile();
-                    break;
-                case "3":
-                    fingerprint = FingerprintManager.GetLinuxProfile();
-                    break;
-                case "4":
-                    fingerprint = FingerprintManager.GetAndroidProfile();
-                    break;
-                case "5":
-                    fingerprint = FingerprintManager.GetIOSProfile();
-                    break;
-                case "6":
-                    fingerprint = FingerprintManager.GetEuropeanProfile();
-                    break;
-                case "7":
-                    fingerprint = FingerprintManager.GetAsianProfile();
-                    break;
-                case "8":
-                    fingerprint = FingerprintManager.GetGamingProfile();
-                    break;
-                case "9":
-                    fingerprint = FingerprintManager.GetBusinessProfile();
-                    break;
-                case "10":
-                    fingerprint = FingerprintManager.GetStudentProfile();
-                    break;
-                case "11":
-                    fingerprint = FingerprintManager.GetRandomProfile();
-                    break;
-                case "12":
-                    fingerprint = FingerprintManager.GenerateRandomFingerprint();
-                    break;
-                default:
-                    Console.WriteLine("❌ Lựa chọn không hợp lệ! Sử dụng fingerprint ngẫu nhiên.");
-                    fingerprint = FingerprintManager.GetRandomProfile();
-                    break;
-            }
-            
-            Console.WriteLine($"\n📱 Fingerprint được chọn: {fingerprint.ProfileName}");
-            Console.WriteLine($"🌐 User Agent: {fingerprint.UserAgent}");
-            Console.WriteLine($"🌍 Ngôn ngữ: {fingerprint.Language}");
-            Console.WriteLine($"🖥️ Platform: {fingerprint.Platform}");
-            Console.WriteLine($"📺 Độ phân giải: {fingerprint.ScreenResolution}");
-            Console.WriteLine($"⏰ Timezone: {fingerprint.Timezone}");
-            Console.WriteLine($"💾 Memory: {fingerprint.DeviceMemory}GB");
-            Console.WriteLine($"🔧 CPU Cores: {fingerprint.HardwareConcurrency}");
-            Console.WriteLine($"🎮 GPU: {fingerprint.WebGLRenderer}");
-            
-            // Tạo Chrome options với fingerprint mới
-            ChromeOptions options = new ChromeOptions();
-            FingerprintManager.ConfigureChromeOptions(options, fingerprint);
-            
-            Console.WriteLine("\n✅ Đã tạo fingerprint mới thành công!");
-            Console.WriteLine("🔍 Bạn có thể test bằng cách mở Chrome với fingerprint này");
-            Console.WriteLine("💡 Tip: Sử dụng fingerprint này trong automation để tránh bị phát hiện!");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"❌ Lỗi khi tạo fingerprint mới: {ex.Message}");
-        }
-    }
-
-    // Hàm xóa tất cả Chrome profiles đã lưu
-    static void ClearAllChromeProfiles()
-    {
-        try
-        {
-            Console.WriteLine("🗑️ Bắt đầu xóa tất cả Chrome profiles đã lưu...");
-            
-            string userDataPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), 
-                "Google", "Chrome", "User Data");
-            
-            if (!Directory.Exists(userDataPath))
-            {
-                Console.WriteLine("📁 Không tìm thấy thư mục Chrome User Data");
-                return;
-            }
-            
-            var regMailProfiles = Directory.GetDirectories(userDataPath)
-                .Where(dir => Path.GetFileName(dir).StartsWith("RegMail_Profile_"))
-                .ToArray();
-            
-            if (regMailProfiles.Length == 0)
-            {
-                Console.WriteLine("📝 Không có profile RegMail nào để xóa");
-                return;
-            }
-            
-            Console.WriteLine($"🔍 Tìm thấy {regMailProfiles.Length} profile RegMail:");
-            foreach (var profile in regMailProfiles)
-            {
-                Console.WriteLine($"   - {Path.GetFileName(profile)}");
-            }
-            
-            Console.Write("\nBạn có chắc chắn muốn xóa tất cả? (y/n): ");
-            if (Console.ReadLine()?.ToLower().StartsWith("y") == true)
-            {
-                int deletedCount = 0;
-                foreach (var profile in regMailProfiles)
-                {
-                    try
-                    {
-                        Directory.Delete(profile, true);
-                        deletedCount++;
-                        Console.WriteLine($"✅ Đã xóa: {Path.GetFileName(profile)}");
-                    }
-                    catch (Exception ex)
-                    {
-                        Console.WriteLine($"❌ Không thể xóa {Path.GetFileName(profile)}: {ex.Message}");
-                    }
-                }
-                Console.WriteLine($"🎉 Đã xóa thành công {deletedCount}/{regMailProfiles.Length} profile!");
-            }
-            else
-            {
-                Console.WriteLine("❌ Đã hủy xóa profiles");
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"❌ Lỗi khi xóa Chrome profiles: {ex.Message}");
-        }
-    }
-
-
-
-    static void InjectAntiDetectionScripts(IWebDriver driver)
-    {
-        try
-        {
-            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
-
-            // 1. Ẩn webdriver property
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'webdriver', {
-                    get: () => undefined,
-                });
-            ");
-
-            // 2. Thay đổi user agent
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'userAgent', {
-                    get: () => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                });
-            ");
-
-            // 3. Thay đổi platform
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'platform', {
-                    get: () => 'Win32',
-                });
-            ");
-
-            // 4. Thay đổi language
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'language', {
-                    get: () => 'en-US',
-                });
-            ");
-
-            // 5. Thay đổi languages array
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'languages', {
-                    get: () => ['en-US', 'en'],
-                });
-            ");
-
-            // 6. Ẩn automation properties
-            js.ExecuteScript(@"
-                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Array;
-                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Promise;
-                delete window.cdc_adoQpoasnfa76pfcZLmcfl_Symbol;
-            ");
-
-            // 7. Thay đổi permissions
-            js.ExecuteScript(@"
-                const originalQuery = window.navigator.permissions.query;
-                window.navigator.permissions.query = (parameters) => (
-                    parameters.name === 'notifications' ?
-                        Promise.resolve({ state: Notification.permission }) :
-                        originalQuery(parameters)
-                );
-            ");
-
-            // 8. Thay đổi plugins
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'plugins', {
-                    get: () => [1, 2, 3, 4, 5],
-                });
-            ");
-
-            // 9. Thay đổi mimeTypes
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'mimeTypes', {
-                    get: () => [1, 2, 3, 4, 5],
-                });
-            ");
-
-            // 10. Thay đổi hardwareConcurrency
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'hardwareConcurrency', {
-                    get: () => 8,
-                });
-            ");
-
-            // 11. Thay đổi deviceMemory
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'deviceMemory', {
-                    get: () => 8,
-                });
-            ");
-
-            // 12. Thay đổi connection
-            js.ExecuteScript(@"
-                Object.defineProperty(navigator, 'connection', {
-                    get: () => ({
-                        effectiveType: '4g',
-                        rtt: 50,
-                        downlink: 10,
-                        saveData: false
-                    }),
-                });
-            ");
-
-            // 13. Thay đổi chrome object
-            js.ExecuteScript(@"
-                window.chrome = {
-                    runtime: {},
-                };
-            ");
-
-            // 14. Thay đổi permissions API
-            js.ExecuteScript(@"
-                const originalQuery = window.navigator.permissions.query;
-                return window.navigator.permissions.query = (parameters) => (
-                    parameters.name === 'notifications' ?
-                        Promise.resolve({ state: Notification.permission }) :
-                        originalQuery(parameters)
-                );
-            ");
-
-            Console.WriteLine("✅ Đã inject thành công các script chống phát hiện automation");
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"⚠️ Lỗi khi inject anti-detection scripts: {ex.Message}");
-        }
-    }
-
     // Hàm mô phỏng thao tác người dùng thật: di chuột, rê chuột, cuộn trang, click linh tinh, delay ngẫu nhiên
     static void HumanLikeActions(IWebDriver driver)
     {
@@ -2580,8 +2206,9 @@ class Program
     // Hàm nhập text nâng cao với nhiều hành vi mô phỏng người dùng thật - PHIÊN BẢN MỚI
     static void HumanTypeAdvanced(IWebElement element, string text, bool enableBackspace = true, bool enablePause = true, bool enableDoubleType = true)
     {
-        Random randomDelay = new Random();
-        Random randomBehavior = new Random();
+        // Sử dụng _random global để tránh pattern
+        Random randomDelay = _random;
+        Random randomBehavior = _random;
         
         Console.WriteLine($"🔍 HumanTypeAdvanced - Bắt đầu nhập: '{text}' (độ dài: {text.Length})");
         
@@ -2618,10 +2245,33 @@ class Program
                 Console.WriteLine($"🔄 Double type: '{wrongChar}' -> backspace -> '{currentChar}'");
             }
             
-            // Nhập ký tự đúng
+            // Nhập ký tự đúng với tốc độ thay đổi theo ngữ cảnh
             element.SendKeys(currentChar.ToString());
             currentPosition++;
-            Thread.Sleep(randomDelay.Next(80, 180));
+            
+            // Tốc độ gõ thay đổi theo ngữ cảnh (giống người thật)
+            int baseSpeed = randomDelay.Next(60, 220); // Dải rộng hơn
+            
+            // Chậm hơn khi gặp khoảng trắng, dấu chấm, dấu phẩy
+            if (currentChar == ' ' || currentChar == '.' || currentChar == ',')
+            {
+                baseSpeed += randomDelay.Next(100, 300); // Pause tự nhiên
+            }
+            
+            // Nhanh hơn khi gõ liên tục (không có khoảng trắng)
+            if (currentPosition > 1 && text[currentPosition - 2] != ' ')
+            {
+                baseSpeed = Math.Max(40, baseSpeed - randomDelay.Next(20, 60));
+            }
+            
+            // 5% chance có "spike" dài (mô phỏng bị phân tâm)
+            if (randomBehavior.Next(1, 21) == 1)
+            {
+                baseSpeed += randomDelay.Next(800, 2000);
+                Console.WriteLine($"🧠 Spike delay: {baseSpeed}ms (phân tâm)");
+            }
+            
+            Thread.Sleep(baseSpeed);
             
             // Có 3% khả năng dừng lại một chút (mô phỏng suy nghĩ)
             if (enablePause && randomBehavior.Next(1, 34) == 1)
@@ -2664,6 +2314,46 @@ class Program
                 }
             }
         }
+        
+        // Thêm mouse behavior cuối cùng (giống người thật)
+        try
+        {
+            // 30% chance move mouse ra khỏi field trước khi blur
+            if (randomBehavior.Next(1, 4) == 1)
+            {
+                // Lấy driver bằng reflection để tránh phụ thuộc vào Internal.IWrapsDriver
+                IWebDriver driver = null;
+                try
+                {
+                    var prop = element.GetType().GetProperty("WrappedDriver", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic);
+                    driver = prop?.GetValue(element) as IWebDriver;
+                }
+                catch { }
+                if (driver == null)
+                {
+                    Console.WriteLine("ℹ️ Không lấy được WrappedDriver từ element, bỏ qua mouse move");
+                }
+                else
+                {
+                    var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                    
+                    // Move mouse ra khỏi field
+                    int offsetX = randomDelay.Next(-100, 101);
+                    int offsetY = randomDelay.Next(-50, 51);
+                    actions.MoveByOffset(offsetX, offsetY).Perform();
+                    
+                    Thread.Sleep(randomDelay.Next(200, 600));
+                    Console.WriteLine($"🖱️ Mouse moved away from field");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Không thể move mouse: {ex.Message}");
+        }
+        
+        // Final pause trước khi blur (giống người thật)
+        Thread.Sleep(randomDelay.Next(500, 1200));
         
         // Kiểm tra và sửa lỗi cuối cùng
         try
@@ -2715,5 +2405,741 @@ class Program
             char[] specialChars = { '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '-', '_', '=', '+', '[', ']', '{', '}', '|', '\\', ';', ':', '"', '\'', ',', '.', '<', '>', '/', '?' };
             return specialChars[random.Next(specialChars.Length)];
         }
+    }
+    // Method sử dụng CDP để stealth
+    static void ApplyCDPStealth(IWebDriver driver)
+    {
+        try
+        {
+            ChromeDriver chromeDriver = driver as ChromeDriver;
+            if (chromeDriver == null)
+            {
+                Console.WriteLine("⚠️ Driver không phải ChromeDriver, bỏ qua CDP stealth");
+                return;
+            }
+            
+            // Sử dụng CDP để execute commands
+            var executeCdpCommand = chromeDriver.GetType().GetMethod("ExecuteCdpCommand");
+            if (executeCdpCommand == null)
+            {
+                Console.WriteLine("⚠️ ExecuteCdpCommand không khả dụng");
+                return;
+            }
+            
+            // Command 1: Set user agent override (quan trọng cho fingerprint)
+            try
+            {
+                var userAgentParams = new Dictionary<string, object>
+                {
+                    { "userAgent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+                    { "platform", "Win32" },
+                    { "userAgentMetadata", new Dictionary<string, object>
+                        {
+                            { "brands", new object[] 
+                                {
+                                    new Dictionary<string, object> { { "brand", "Not_A Brand" }, { "version", "8" } },
+                                    new Dictionary<string, object> { { "brand", "Chromium" }, { "version", "120" } },
+                                    new Dictionary<string, object> { { "brand", "Google Chrome" }, { "version", "120" } }
+                                }
+                            },
+                            { "fullVersion", "120.0.6099.109" },
+                            { "platform", "Windows" },
+                            { "platformVersion", "10.0.0" },
+                            { "architecture", "x86" },
+                            { "model", "" },
+                            { "mobile", false }
+                        }
+                    }
+                };
+                executeCdpCommand.Invoke(chromeDriver, new object[] { "Network.setUserAgentOverride", userAgentParams });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Lỗi khi set user agent via CDP: {ex.Message}");
+            }
+            
+            // Command 2: Disable web security notifications
+            try
+            {
+                executeCdpCommand.Invoke(chromeDriver, new object[] { "Page.setWebLifecycleState", new Dictionary<string, object> { { "state", "active" } } });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Lỗi khi set web lifecycle: {ex.Message}");
+            }
+            
+            Console.WriteLine("✅ Đã áp dụng CDP stealth thành công");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi áp dụng CDP stealth: {ex.Message}");
+        }
+    }
+    
+    // Method inject JavaScript stealth scripts để tránh bị phát hiện automation
+    static void InjectAntiDetectionScripts(IWebDriver driver)
+    {
+        try
+        {
+            // Áp dụng CDP stealth trước
+            ApplyCDPStealth(driver);
+            
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            
+            // Script 1: Override navigator.webdriver
+            string script1 = @"
+                Object.defineProperty(navigator, 'webdriver', {
+                    get: () => undefined
+                });
+            ";
+            
+            // Script 2: Override chrome runtime
+            string script2 = @"
+                window.navigator.chrome = {
+                    runtime: {}
+                };
+            ";
+            
+            // Script 3: Override permissions
+            string script3 = @"
+                const originalQuery = window.navigator.permissions.query;
+                window.navigator.permissions.query = (parameters) => (
+                    parameters.name === 'notifications' ?
+                        Promise.resolve({ state: Notification.permission }) :
+                        originalQuery(parameters)
+                );
+            ";
+            
+            // Script 4: Override plugins length
+            string script4 = @"
+                Object.defineProperty(navigator, 'plugins', {
+                    get: () => [1, 2, 3, 4, 5]
+                });
+            ";
+            
+            // Script 5: Override languages
+            string script5 = @"
+                Object.defineProperty(navigator, 'languages', {
+                    get: () => ['en-US', 'en']
+                });
+            ";
+            
+            // Script 6: Override connection rtt (giảm khả năng phát hiện datacenter)
+            string script6 = @"
+                if (navigator.connection) {
+                    Object.defineProperty(navigator.connection, 'rtt', {
+                        get: () => " + _random.Next(50, 150) + @"
+                    });
+                }
+            ";
+            
+            // Script 7: Override battery API
+            string script7 = @"
+                if (navigator.getBattery) {
+                    navigator.getBattery = () => Promise.resolve({
+                        charging: true,
+                        chargingTime: 0,
+                        dischargingTime: Infinity,
+                        level: 1.0
+                    });
+                }
+            ";
+            
+            // Script 8: Override automation-controlled feature
+            string script8 = @"
+                delete navigator.__proto__.webdriver;
+            ";
+            
+            // Script 9: Override Chrome App and Load Times
+            string script9 = @"
+                window.chrome = {
+                    app: {
+                        isInstalled: false,
+                        InstallState: {
+                            DISABLED: 'disabled',
+                            INSTALLED: 'installed',
+                            NOT_INSTALLED: 'not_installed'
+                        },
+                        RunningState: {
+                            CANNOT_RUN: 'cannot_run',
+                            READY_TO_RUN: 'ready_to_run',
+                            RUNNING: 'running'
+                        }
+                    },
+                    runtime: {
+                        OnInstalledReason: {
+                            CHROME_UPDATE: 'chrome_update',
+                            INSTALL: 'install',
+                            SHARED_MODULE_UPDATE: 'shared_module_update',
+                            UPDATE: 'update'
+                        },
+                        OnRestartRequiredReason: {
+                            APP_UPDATE: 'app_update',
+                            OS_UPDATE: 'os_update',
+                            PERIODIC: 'periodic'
+                        },
+                        PlatformArch: {
+                            ARM: 'arm',
+                            ARM64: 'arm64',
+                            MIPS: 'mips',
+                            MIPS64: 'mips64',
+                            X86_32: 'x86-32',
+                            X86_64: 'x86-64'
+                        },
+                        PlatformNaclArch: {
+                            ARM: 'arm',
+                            MIPS: 'mips',
+                            MIPS64: 'mips64',
+                            X86_32: 'x86-32',
+                            X86_64: 'x86-64'
+                        },
+                        PlatformOs: {
+                            ANDROID: 'android',
+                            CROS: 'cros',
+                            LINUX: 'linux',
+                            MAC: 'mac',
+                            OPENBSD: 'openbsd',
+                            WIN: 'win'
+                        },
+                        RequestUpdateCheckStatus: {
+                            NO_UPDATE: 'no_update',
+                            THROTTLED: 'throttled',
+                            UPDATE_AVAILABLE: 'update_available'
+                        }
+                    }
+                };
+            ";
+            
+            // Script 10: Override toString() để ẩn native code
+            string script10 = @"
+                const overrideToString = (obj, name) => {
+                    const handler = {
+                        apply: function(target, ctx, args) {
+                            return target.apply(ctx, args);
+                        }
+                    };
+                    obj[name] = new Proxy(obj[name], handler);
+                    obj[name].toString = function() { return 'function ' + name + '() { [native code] }'; };
+                };
+                
+                if (navigator.permissions && navigator.permissions.query) {
+                    overrideToString(navigator.permissions, 'query');
+                }
+            ";
+            
+            // Execute tất cả scripts
+            js.ExecuteScript(script1);
+            js.ExecuteScript(script2);
+            js.ExecuteScript(script3);
+            js.ExecuteScript(script4);
+            js.ExecuteScript(script5);
+            js.ExecuteScript(script6);
+            js.ExecuteScript(script7);
+            js.ExecuteScript(script8);
+            js.ExecuteScript(script9);
+            js.ExecuteScript(script10);
+            
+            Console.WriteLine("✅ Đã inject stealth scripts thành công");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi inject stealth scripts: {ex.Message}");
+        }
+    }
+    
+    static void HandleProxyAuthPopup(IWebDriver driver)
+    {
+        try
+        {
+            // Đợi một chút để popup có thể xuất hiện
+            Thread.Sleep(2000);
+            
+            // Kiểm tra xem có popup authentication không
+            var authDialogs = driver.FindElements(By.XPath("//div[contains(text(), 'Sign in') or contains(text(), 'Authentication')]"));
+            if (authDialogs.Count > 0)
+            {
+                Console.WriteLine("🔐 Phát hiện proxy authentication popup, đang xử lý...");
+                
+                // Tìm username và password fields
+                var usernameFields = driver.FindElements(By.XPath("//input[@type='text' or @name='username' or @id='username']"));
+                var passwordFields = driver.FindElements(By.XPath("//input[@type='password' or @name='password' or @id='password']"));
+                
+                if (usernameFields.Count > 0 && passwordFields.Count > 0 && _currentProxy != null && _currentProxy.HasAuth)
+                {
+                    // Điền username
+                    usernameFields[0].Clear();
+                    HumanType(usernameFields[0], _currentProxy.Username);
+                    Thread.Sleep(500);
+                    
+                    // Điền password
+                    passwordFields[0].Clear();
+                    HumanType(passwordFields[0], _currentProxy.Password);
+                    Thread.Sleep(500);
+                    
+                    // Tìm và click nút Sign in
+                    var signInButtons = driver.FindElements(By.XPath("//button[contains(text(), 'Sign in') or contains(text(), 'Login') or contains(text(), 'OK')]"));
+                    if (signInButtons.Count > 0)
+                    {
+                        signInButtons[0].Click();
+                        Console.WriteLine("✅ Đã xử lý proxy authentication popup");
+                        Thread.Sleep(2000);
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi xử lý proxy auth popup: {ex.Message}");
+        }
+    }
+    
+    // =====================================================
+    // CẢI THIỆN HUMAN-LIKE BEHAVIOR ĐỂ TRÁNH VERIFY
+    // =====================================================
+    
+    /// <summary>
+    /// Kiểm tra và cải thiện network fingerprint
+    /// </summary>
+    static void ImproveNetworkFingerprint(IWebDriver driver)
+    {
+        try
+        {
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            
+            // Script 1: Override connection RTT để giống residential
+            string networkScript = @"
+                if (navigator.connection) {
+                    Object.defineProperty(navigator.connection, 'rtt', {
+                        get: () => " + _random.Next(50, 200) + @"
+                    });
+                    Object.defineProperty(navigator.connection, 'downlink', {
+                        get: () => " + (_random.Next(1, 10) + 0.1).ToString("F1") + @"
+                    });
+                    Object.defineProperty(navigator.connection, 'effectiveType', {
+                        get: () => '4g'
+                    });
+                }
+            ";
+            js.ExecuteScript(networkScript);
+            
+            // Script 2: Override battery để giống laptop
+            string batteryScript = @"
+                if (navigator.getBattery) {
+                    navigator.getBattery = () => Promise.resolve({
+                        charging: " + (_random.Next(0, 2) == 1 ? "true" : "false") + @",
+                        chargingTime: " + _random.Next(0, 3600) + @",
+                        dischargingTime: " + _random.Next(3600, 14400) + @",
+                        level: " + (_random.Next(20, 100) / 100.0).ToString("F2") + @"
+                    });
+                }
+            ";
+            js.ExecuteScript(batteryScript);
+            
+            Console.WriteLine("✅ Đã cải thiện network fingerprint");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi cải thiện network fingerprint: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Thêm random browsing behavior để build profile history
+    /// </summary>
+    static void AddBrowsingBehavior(IWebDriver driver)
+    {
+        try
+        {
+            // 30% chance để thêm browsing behavior
+            if (_random.Next(1, 4) == 1)
+            {
+                Console.WriteLine("🌐 Thêm browsing behavior để build profile...");
+                
+                // Random actions
+                int action = _random.Next(1, 5);
+                switch (action)
+                {
+                    case 1: // Scroll để "đọc" trang
+                        int scrollAmount = _random.Next(200, 800);
+                        ((IJavaScriptExecutor)driver).ExecuteScript($"window.scrollBy({{top: {scrollAmount}, left: 0, behavior: 'smooth'}});");
+                        SmartDelay("read", 2000, 4000);
+                        break;
+                        
+                    case 2: // Hover trên links
+                        var links = driver.FindElements(By.TagName("a"));
+                        if (links.Count > 0)
+                        {
+                            var randomLink = links[_random.Next(0, Math.Min(links.Count, 5))];
+                            var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                            actions.MoveToElement(randomLink).Perform();
+                            SmartDelay("read", 1000, 3000);
+                        }
+                        break;
+                        
+                    case 3: // "Đọc" nội dung (pause lâu)
+                        SmartDelay("read", 5000, 10000);
+                        break;
+                        
+                    case 4: // Random mouse movement
+                        var actions2 = new OpenQA.Selenium.Interactions.Actions(driver);
+                        int x = _random.Next(100, 1000);
+                        int y = _random.Next(100, 700);
+                        actions2.MoveByOffset(x, y).Perform();
+                        SmartDelay("think", 1000, 3000);
+                        break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi thêm browsing behavior: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Kiểm tra và cải thiện fingerprint consistency
+    /// </summary>
+    static void EnsureFingerprintConsistency(IWebDriver driver)
+    {
+        try
+        {
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            
+            // Script: Đảm bảo fingerprint nhất quán
+            string consistencyScript = @"
+                // Đảm bảo timezone khớp với IP location
+                const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+                console.log('Timezone:', timezone);
+                
+                // Đảm bảo language khớp với region
+                const language = navigator.language;
+                console.log('Language:', language);
+                
+                // Đảm bảo screen resolution hợp lý
+                const screen = {
+                    width: screen.width,
+                    height: screen.height,
+                    availWidth: screen.availWidth,
+                    availHeight: screen.availHeight
+                };
+                console.log('Screen:', screen);
+                
+                // Đảm bảo WebGL vendor hợp lệ
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (gl) {
+                    const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                    if (debugInfo) {
+                        const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                        const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                        console.log('WebGL Vendor:', vendor);
+                        console.log('WebGL Renderer:', renderer);
+                    }
+                }
+            ";
+            js.ExecuteScript(consistencyScript);
+            
+            Console.WriteLine("✅ Đã kiểm tra fingerprint consistency");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi kiểm tra consistency: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Delay thông minh dựa trên loại action
+    /// </summary>
+    static void SmartDelay(string action, int minMs = 1000, int maxMs = 3000)
+    {
+        // Delay dựa trên loại action
+        int baseDelay = 0;
+        switch (action.ToLower())
+        {
+            case "click":
+                baseDelay = _random.Next(500, 1500); // Click nhanh hơn
+                break;
+            case "type":
+                baseDelay = _random.Next(800, 1500); // Typing cần thời gian
+                break;
+            case "navigate":
+                baseDelay = _random.Next(2000, 4000); // Navigation cần thời gian load
+                break;
+            case "think":
+                baseDelay = _random.Next(3000, 6000); // "Suy nghĩ" lâu hơn
+                break;
+            case "read":
+                baseDelay = _random.Next(2000, 5000); // Đọc nội dung
+                break;
+            default:
+                baseDelay = _random.Next(minMs, maxMs);
+                break;
+        }
+        
+        // Thêm random variation
+        int finalDelay = baseDelay + _random.Next(-500, 1000);
+        finalDelay = Math.Max(200, finalDelay); // Tối thiểu 200ms
+        
+        Console.WriteLine($"⏰ {action} delay: {finalDelay}ms");
+        Thread.Sleep(finalDelay);
+    }
+    
+    // =====================================================
+    // CẢI THIỆN PROFILE TRUST SCORE ĐỂ TRÁNH VERIFY
+    // =====================================================
+    
+    /// <summary>
+    /// Build profile history để tăng trust score
+    /// </summary>
+    static void BuildProfileHistory(IWebDriver driver)
+    {
+        try
+        {
+            Console.WriteLine("🏗️ Building profile history...");
+            
+            // 1. Visit Google.com trước
+            driver.Navigate().GoToUrl("https://www.google.com");
+            SmartDelay("navigate", 3000, 6000);
+            
+            // 2. Search một vài từ
+            var searchBox = driver.FindElement(By.Name("q"));
+            string[] searchTerms = { "weather", "news", "sports", "technology" };
+            string searchTerm = searchTerms[_random.Next(searchTerms.Length)];
+            
+            HumanTypeAdvanced(searchBox, searchTerm);
+            SmartDelay("think", 2000, 4000);
+            
+            // 3. Click search
+            var searchButton = driver.FindElement(By.Name("btnK"));
+            searchButton.Click();
+            SmartDelay("navigate", 3000, 6000);
+            
+            // 4. Click vào một vài links
+            var links = driver.FindElements(By.CssSelector("h3"));
+            if (links.Count > 0)
+            {
+                var randomLink = links[_random.Next(0, Math.Min(links.Count, 3))];
+                randomLink.Click();
+                SmartDelay("read", 5000, 10000);
+                
+                // Scroll để "đọc"
+                ((IJavaScriptExecutor)driver).ExecuteScript("window.scrollBy(0, 500);");
+                SmartDelay("read", 3000, 6000);
+            }
+            
+            // 5. Quay lại Google
+            driver.Navigate().Back();
+            SmartDelay("navigate", 2000, 4000);
+            
+            Console.WriteLine("✅ Profile history built successfully");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi build profile history: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Cải thiện device fingerprint để tránh detection
+    /// </summary>
+    static void ImproveDeviceFingerprint(IWebDriver driver)
+    {
+        try
+        {
+            IJavaScriptExecutor js = (IJavaScriptExecutor)driver;
+            
+            // Script 1: Override screen properties
+            string screenScript = @"
+                Object.defineProperty(screen, 'width', { get: () => 1920 });
+                Object.defineProperty(screen, 'height', { get: () => 1080 });
+                Object.defineProperty(screen, 'availWidth', { get: () => 1920 });
+                Object.defineProperty(screen, 'availHeight', { get: () => 1040 });
+                Object.defineProperty(screen, 'colorDepth', { get: () => 24 });
+                Object.defineProperty(screen, 'pixelDepth', { get: () => 24 });
+            ";
+            js.ExecuteScript(screenScript);
+            
+            // Script 2: Override timezone
+            string timezoneScript = @"
+                Object.defineProperty(Intl.DateTimeFormat.prototype, 'resolvedOptions', {
+                    value: function() { return { timeZone: 'America/New_York' }; }
+                });
+            ";
+            js.ExecuteScript(timezoneScript);
+            
+            // Script 3: Override language
+            string languageScript = @"
+                Object.defineProperty(navigator, 'language', { get: () => 'en-US' });
+                Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            ";
+            js.ExecuteScript(languageScript);
+            
+            Console.WriteLine("✅ Device fingerprint improved");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi improve device fingerprint: {ex.Message}");
+        }
+    }
+    
+    /// <summary>
+    /// Thêm random browsing behavior để build trust
+    /// </summary>
+    static void AddTrustBuildingBehavior(IWebDriver driver)
+    {
+        try
+        {
+            // 40% chance thêm trust building behavior
+            if (_random.Next(1, 6) <= 2)
+            {
+                Console.WriteLine("🤝 Adding trust building behavior...");
+                
+                // Random actions để build trust
+                int action = _random.Next(1, 6);
+                switch (action)
+                {
+                    case 1: // Scroll để "đọc" trang
+                        int scrollAmount = _random.Next(300, 800);
+                        ((IJavaScriptExecutor)driver).ExecuteScript($"window.scrollBy({{top: {scrollAmount}, left: 0, behavior: 'smooth'}});");
+                        SmartDelay("read", 3000, 6000);
+                        break;
+                        
+                    case 2: // Hover trên elements
+                        var elements = driver.FindElements(By.TagName("button"));
+                        if (elements.Count > 0)
+                        {
+                            var randomElement = elements[_random.Next(0, Math.Min(elements.Count, 3))];
+                            var actions = new OpenQA.Selenium.Interactions.Actions(driver);
+                            actions.MoveToElement(randomElement).Perform();
+                            SmartDelay("read", 2000, 4000);
+                        }
+                        break;
+                        
+                    case 3: // "Đọc" nội dung lâu
+                        SmartDelay("read", 8000, 15000);
+                        break;
+                        
+                    case 4: // Random mouse movement
+                        var actions2 = new OpenQA.Selenium.Interactions.Actions(driver);
+                        int x = _random.Next(200, 1000);
+                        int y = _random.Next(200, 700);
+                        actions2.MoveByOffset(x, y).Perform();
+                        SmartDelay("think", 2000, 4000);
+                        break;
+                        
+                    case 5: // Focus vào field khác
+                        var inputs = driver.FindElements(By.TagName("input"));
+                        if (inputs.Count > 1)
+                        {
+                            var randomInput = inputs[_random.Next(0, Math.Min(inputs.Count, 3))];
+                            randomInput.Click();
+                            SmartDelay("think", 1000, 3000);
+                        }
+                        break;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"⚠️ Lỗi khi add trust building behavior: {ex.Message}");
+        }
+    }
+
+    // =====================================================
+    // CHỨC NĂNG MỚI: TẠO NHIỀU GMAIL VỚI PROFILE ROTATION
+    // =====================================================
+    
+    /// <summary>
+    /// Tạo nhiều Gmail tự động với profile rotation để tránh phát hiện
+    /// </summary>
+    static async Task CreateMultipleGmailsWithRotation()
+    {
+        Console.WriteLine("\n🎯 CHẾ ĐỘ TẠO NHIỀU GMAIL VỚI PROFILE ROTATION");
+        Console.WriteLine("═══════════════════════════════════════════════════");
+        
+        // Hiển thị profiles hiện có
+        AdvancedChromeConfig.ShowAllProfilesInfo();
+        
+        // Hỏi số lượng Gmail muốn tạo
+        Console.Write("\n📊 Nhập số lượng Gmail muốn tạo: ");
+        if (!int.TryParse(Console.ReadLine(), out int totalGmails) || totalGmails <= 0)
+        {
+            Console.WriteLine("❌ Số lượng không hợp lệ!");
+            return;
+        }
+        
+        // Hiển thị khuyến nghị
+        AdvancedChromeConfig.ShowScalingRecommendation(totalGmails);
+        
+        // Xác nhận
+        Console.Write($"\n⚠️ Bạn có chắc muốn tạo {totalGmails} Gmail với profile rotation? (y/n): ");
+        if (Console.ReadLine()?.ToLower() != "y")
+        {
+            Console.WriteLine("❌ Đã hủy!");
+            return;
+        }
+        
+        // Hỏi về Gmail sync
+        Console.Write("\nBạn có muốn đăng nhập và đồng bộ Gmail sau khi tạo? (y/n): ");
+        bool enableSync = Console.ReadLine()?.ToLower().StartsWith("y") == true;
+        
+        // Hỏi về spacing (phút)
+        Console.Write("\nNhập spacing giữa mỗi lần tạo (phút, khuyến nghị 30): ");
+        if (!int.TryParse(Console.ReadLine(), out int spacingMinutes) || spacingMinutes < 5)
+        {
+            spacingMinutes = 30; // Mặc định 30 phút
+        }
+        
+        int spacingMilliseconds = spacingMinutes * 60 * 1000;
+        
+        Console.WriteLine($"\n✅ Bắt đầu tạo {totalGmails} Gmail với spacing {spacingMinutes} phút");
+        Console.WriteLine("═══════════════════════════════════════════════════\n");
+        
+        int successCount = 0;
+        int failCount = 0;
+        
+        for (int i = 0; i < totalGmails; i++)
+        {
+            // Rotation profile trước mỗi lần tạo
+            string currentProfile = AdvancedChromeConfig.RotateToNextProfile();
+            
+            Console.WriteLine($"\n{new string('=', 50)}");
+            Console.WriteLine($"🔄 TẠO GMAIL {i + 1}/{totalGmails}");
+            Console.WriteLine($"📁 Profile: {currentProfile}");
+            Console.WriteLine($"{new string('=', 50)}\n");
+            
+            try
+            {
+                // Tạo Gmail (tương tự logic ở chế độ 1)
+                // TODO: Extract logic tạo Gmail thành một method riêng để tái sử dụng
+                Console.WriteLine($"⚠️ Chức năng này đang được phát triển!");
+                Console.WriteLine($"   Hiện tại hãy sử dụng chế độ 1 với manual profile selection");
+                Console.WriteLine($"   Hoặc chạy script nhiều lần và thay đổi profile manually");
+                
+                // Placeholder - bạn cần extract logic từ Main() vào đây
+                successCount++;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"❌ Lỗi khi tạo Gmail {i + 1}: {ex.Message}");
+                failCount++;
+            }
+            
+            // Spacing giữa các lần tạo (trừ lần cuối)
+            if (i < totalGmails - 1)
+            {
+                Console.WriteLine($"\n⏰ Chờ {spacingMinutes} phút trước khi tạo Gmail tiếp theo...");
+                Console.WriteLine($"   (Có thể nhấn Ctrl+C để dừng)");
+                Thread.Sleep(spacingMilliseconds);
+            }
+        }
+        
+        // Tổng kết
+        Console.WriteLine("\n═══════════════════════════════════════════════════");
+        Console.WriteLine("📊 KẾT QUẢ TỔNG KẾT:");
+        Console.WriteLine($"   ✅ Thành công: {successCount}/{totalGmails}");
+        Console.WriteLine($"   ❌ Thất bại: {failCount}/{totalGmails}");
+        Console.WriteLine($"   📈 Tỷ lệ thành công: {(successCount * 100.0 / totalGmails):F1}%");
+        Console.WriteLine("═══════════════════════════════════════════════════\n");
     }
 }

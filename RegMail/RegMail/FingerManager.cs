@@ -577,6 +577,7 @@ namespace RegMail
         {
             if (fingerprint == null)
             {
+                Console.WriteLine("New Fingerprint");
                 fingerprint = GenerateRandomFingerprint();
             }
 
@@ -629,77 +630,18 @@ namespace RegMail
                 options.AddArgument($"--window-size={resolution[0]},{resolution[1]}");
             }
 
-            // Cấu hình để tránh phát hiện automation
+            // Cấu hình để tránh phát hiện automation (CHỈ GIỮ CÁC CẤU HÌNH QUAN TRỌNG)
             options.AddArgument("--disable-blink-features=AutomationControlled");
             options.AddExcludedArgument("enable-automation");
-            options.AddArgument("--disable-features=VizDisplayCompositor");
-            options.AddArgument("--disable-dev-shm-usage");
-            options.AddArgument("--no-sandbox");
-            options.AddArgument("--disable-default-apps");
-            options.AddArgument("--disable-sync");
-            options.AddArgument("--disable-background-timer-throttling");
-            options.AddArgument("--disable-client-side-phishing-detection");
-            options.AddArgument("--disable-component-extensions-with-background-pages");
-            options.AddArgument("--disable-hang-monitor");
-            options.AddArgument("--disable-ipc-flooding-protection");
-            options.AddArgument("--disable-features=TranslateUI");
-            options.AddArgument("--disable-ignore-certificate-errors");
-            options.AddArgument("--disable-features=site-per-process");
-            options.AddArgument("--disable-site-isolation-trials");
-            options.AddArgument("--disable-features=BlinkGenPropertyTrees");
-            options.AddArgument("--disable-features=ImprovedCookieControls");
-            options.AddArgument("--disable-features=SameSiteByDefaultCookies");
-            options.AddArgument("--disable-features=CookiesWithoutSameSiteMustBeSecure");
-            options.AddArgument("--disable-features=AutoupgradeMixedContent");
-            options.AddArgument("--disable-features=AutoupgradeImageAds");
-            options.AddArgument("--disable-features=AutoupgradeMixedContent");
-            options.AddArgument("--disable-features=AutoupgradeImageAds");
-            options.AddArgument("--disable-features=AutoupgradeMixedContent");
-            options.AddArgument("--disable-features=AutoupgradeImageAds");
 
-            // Thêm các preference để thay đổi fingerprint
-            options.AddUserProfilePreference("profile.default_content_setting_values.notifications", 2);
-            options.AddUserProfilePreference("profile.default_content_settings.popups", 0);
-            options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.media_stream", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.geolocation", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.mixed_script", 1);
-            options.AddUserProfilePreference("profile.default_content_setting_values.media_stream_mic", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.media_stream_camera", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.protocol_handlers", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.ppapi_broker", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.automatic_downloads", 1);
-            options.AddUserProfilePreference("profile.default_content_setting_values.midi_sysex", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.push_messaging", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.ssl_cert_decisions", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.metro_switch_to_desktop", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.protected_media_identifier", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.app_banner", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.site_engagement", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.durable_storage", 2);
-
-            // Thêm các preference để thay đổi fingerprint - Đảm bảo luôn là tiếng Anh US
+            // Cấu hình language - Đảm bảo luôn là tiếng Anh US
             options.AddUserProfilePreference("intl.accept_languages", "en-US,en");
             options.AddUserProfilePreference("intl.locale", "en-US");
             options.AddUserProfilePreference("intl.regional_locale", "en-US");
-            options.AddUserProfilePreference("profile.default_content_setting_values.notifications", 2);
-            options.AddUserProfilePreference("profile.managed_default_content_settings.images", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.media_stream", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.geolocation", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.mixed_script", 1);
-            options.AddUserProfilePreference("profile.default_content_setting_values.media_stream_mic", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.media_stream_camera", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.protocol_handlers", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.ppapi_broker", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.automatic_downloads", 1);
-            options.AddUserProfilePreference("profile.default_content_setting_values.midi_sysex", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.push_messaging", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.ssl_cert_decisions", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.metro_switch_to_desktop", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.protected_media_identifier", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.app_banner", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.site_engagement", 2);
-            options.AddUserProfilePreference("profile.default_content_setting_values.durable_storage", 2);
+            
+            // Chỉ disable những thứ cần thiết (KHÔNG DISABLE IMAGES - sẽ bị phát hiện!)
+            options.AddUserProfilePreference("profile.default_content_setting_values.notifications", 2); // Tắt thông báo
+            options.AddUserProfilePreference("profile.default_content_settings.popups", 0); // Cho phép popups
         }
 
         public static void ClearChromeData()

@@ -79,7 +79,7 @@ namespace RegMail
             }
             throw new InvalidOperationException("Không tìm thấy HTTP proxy còn hoạt động.");
         }
-        public static void ApplyToChrome(ChromeOptions options, ProxySpec p, bool headless = false)
+        public static void ApplyToChrome(ChromeOptions options, ProxySpec p)
         {
             if (options == null) throw new ArgumentNullException(nameof(options));
             if (p == null) throw new ArgumentNullException(nameof(p));
@@ -87,21 +87,36 @@ namespace RegMail
             if (p.IsSocks && p.HasAuth)
                 throw new NotSupportedException("SOCKS proxy có username/password không được Chrome hỗ trợ trực tiếp. Hãy dùng HTTP proxy hoặc forwarder HTTP→SOCKS5.");
 
+            // Cấu hình proxy server
             options.AddArgument("--proxy-bypass-list=localhost,127.0.0.1");
             options.AddArgument($"--proxy-server={p.Scheme}://{p.Host}:{p.Port}");
 
+            // Xử lý authentication cho HTTP proxy
             if (p.IsHttp && p.HasAuth)
             {
-                if (headless)
+                try
                 {
-                    Console.WriteLine("⚠️ Headless + HTTP proxy có auth: extension không chạy → khả năng bị 407. Cân nhắc chạy non-headless hoặc dùng forwarder.");
-                }
-                else
-                {
+                    Console.WriteLine($"🔐 Đang tạo AutoAuth extension cho proxy: {p.Username}@{p.Host}:{p.Port}");
                     string extZip = BuildAutoAuthExtensionZip(p.Username, p.Password);
                     options.AddExtension(extZip);
+                    Console.WriteLine($"✅ Đã thêm AutoAuth extension cho proxy authentication");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"❌ Lỗi khi tạo AutoAuth extension: {ex.Message}");
+                    throw;
                 }
             }
+            
+            // Thêm các argument để tránh proxy authentication popup
+            if (p.HasAuth)
+            {
+                options.AddArgument("--disable-features=VizDisplayCompositor");
+                options.AddArgument("--ignore-certificate-errors");
+                options.AddArgument("--ignore-ssl-errors");
+                options.AddArgument("--ignore-certificate-errors-spki-list");
+            }
+            
             Console.WriteLine($"✅ Applied proxy: {p}");
         }
         private static ProxySpec ParseLine(string line)
@@ -215,7 +230,15 @@ namespace RegMail
 
             var handler = new HttpClientHandler();
             handler.Proxy = new WebProxy(p.Host, p.Port);
-            if (p.HasAuth) handler.Proxy.Credentials = new NetworkCredential(p.Username, p.Password);
+            if (p.HasAuth) 
+            {
+                handler.Proxy.Credentials = new NetworkCredential(p.Username, p.Password);
+                Console.WriteLine($"🔐 Testing proxy with auth: {p.Username}@{p.Host}:{p.Port}");
+            }
+            else
+            {
+                Console.WriteLine($"🔍 Testing proxy without auth: {p.Host}:{p.Port}");
+            }
             handler.UseProxy = true;
 
             var http = new HttpClient(handler);
@@ -224,10 +247,20 @@ namespace RegMail
             try
             {
                 var resp = await http.GetAsync("https://httpbin.org/ip").ConfigureAwait(false);
-                return ((int)resp.StatusCode >= 200) && ((int)resp.StatusCode < 300);
+                bool success = ((int)resp.StatusCode >= 200) && ((int)resp.StatusCode < 300);
+                if (success)
+                {
+                    Console.WriteLine($"✅ Proxy test thành công: {p}");
+                }
+                else
+                {
+                    Console.WriteLine($"❌ Proxy test thất bại - Status: {resp.StatusCode}");
+                }
+                return success;
             }
-            catch
+            catch (Exception ex)
             {
+                Console.WriteLine($"❌ Proxy test lỗi: {ex.Message}");
                 return false;
             }
             finally
@@ -240,20 +273,34 @@ namespace RegMail
             string dir = Path.Combine(Path.GetTempPath(), "AutoAuth_" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(dir);
 
+            // Manifest v3 cho Chrome mới hơn
             File.WriteAllText(Path.Combine(dir, "manifest.json"), @"{
   ""version"": ""1.0.0"",
-  ""manifest_version"": 2,
+  ""manifest_version"": 3,
   ""name"": ""AutoAuth Proxy"",
-  ""permissions"": [""webRequest"", ""webRequestBlocking"", ""<all_urls>""],
-  ""background"": { ""scripts"": [""background.js""] }
+  ""permissions"": [""webRequest"", ""webRequestBlocking""],
+  ""host_permissions"": [""<all_urls>""],
+  ""background"": { ""service_worker"": ""background.js"" }
 }");
+            
+            // Background script MV3 dùng Promise cho blocking response
             string bg = $@"chrome.webRequest.onAuthRequired.addListener(
-  function (details) {{
-    return {{ authCredentials: {{ username: ""{EscapeJs(username)}"", password: ""{EscapeJs(password)}"" }} }};
+  (details) => {{
+    return new Promise((resolve) => {{
+      resolve({{
+        authCredentials: {{
+          username: '{EscapeJs(username)}',
+          password: '{EscapeJs(password)}'
+        }}
+      }});
+    }});
   }},
-  {{ urls: [""<all_urls>""] }},
+  {{ urls: ['<all_urls>'] }},
   ['blocking']
-);";
+);
+
+console.log('AutoAuth MV3 loaded');
+";
             File.WriteAllText(Path.Combine(dir, "background.js"), bg);
 
             string zip = Path.Combine(Path.GetTempPath(), "AutoAuth_" + Guid.NewGuid().ToString("N") + ".zip");

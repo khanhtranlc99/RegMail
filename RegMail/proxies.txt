@@ -23,7 +23,7 @@
 # PROXY CỦA BẠN:
 # ============================================
 
-# HTTP Proxy hiện tại:
+# HTTP Proxy hiện tại (format: host:port:username:password):
 1.52.178.123:23318:YAMiHB:petgbc
 113.181.251.114:33270:BXExOT:fnaamh
 
